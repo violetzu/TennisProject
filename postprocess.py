@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 from sympy import Line
 from scipy.spatial import distance
+from sympy.geometry.point import Point2D
+
+
 def line_intersection(line1, line2):
     """
     Find 2 lines intersection point
@@ -10,7 +13,10 @@ def line_intersection(line1, line2):
     l2 = Line((line2[0], line2[1]), (line2[2], line2[3]))
 
     intersection = l1.intersection(l2)
-    point = intersection[0].coordinates if len(intersection) > 0 else None
+    point = None
+    if len(intersection) > 0:
+        if isinstance(intersection[0], Point2D):
+            point = intersection[0].coordinates
     return point 
 
 def refine_kps(img, x_ct, y_ct, crop_size=40):
@@ -24,6 +30,7 @@ def refine_kps(img, x_ct, y_ct, crop_size=40):
 
     img_crop = img[x_min:x_max, y_min:y_max]
     lines = detect_lines(img_crop)
+    # print('lines = ', lines)
     
     if len(lines) > 1:
         lines = merge_lines(lines)

@@ -27,7 +27,7 @@ def get_trans_matrix(points):
         inters = [points[inds[0]], points[inds[1]], points[inds[2]], points[inds[3]]]
         if None not in inters:
             matrix, _ = cv2.findHomography(np.float32(conf), np.float32(inters), method=0)
-            trans_kps = cv2.perspectiveTransform(refer_kps, matrix)
+            trans_kps = cv2.perspectiveTransform(refer_kps, matrix).squeeze(1)
             dists = []
             for i in range(12):
                 if i not in inds and points[i] is not None:
