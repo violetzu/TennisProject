@@ -1,3 +1,5 @@
+"""選手偵測與追蹤：利用 YOLO 姿態模型抓取場上選手。"""
+
 import cv2
 import numpy as np
 import torch
@@ -31,6 +33,8 @@ class PersonDetector():
         
     def detect(self, image, person_min_score=0.5):
         """Run YOLO pose inference on the provided image.
+
+        透過 YOLO 模型推論影像中的人物框與關節點。
 
         Returns:
             tuple: bounding boxes, probabilities and keypoints for detected persons.
@@ -73,6 +77,7 @@ class PersonDetector():
             detections = []
             for bbox, score, kps in zip(bboxes, probs, keypoints):
                 person_point = [int((bbox[2] + bbox[0]) / 2), int(bbox[3])]
+                # 以腳底中心當作小地圖上的選手位置
                 detections.append((bbox, person_point, score, kps))
 
             # keep only two most confident detections overall
@@ -122,11 +127,11 @@ class PersonDetector():
             img = frames[num_frame]
             if matrix_all[num_frame] is not None:
                 inv_matrix = matrix_all[num_frame]
+                # 將偵測結果依單應矩陣映射到上下場區
                 person_top, person_bottom = self.detect_top_and_bottom_players(img, inv_matrix, filter_players)
             else:
                 person_top, person_bottom = [], []
             persons_top.append(person_top)
             persons_bottom.append(person_bottom)
         return persons_top, persons_bottom    
-
 

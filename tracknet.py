@@ -1,8 +1,11 @@
+"""TrackNet 模型結構定義：用於球與球場關鍵點偵測。"""
+
 import torch.nn as nn
 import torch
 
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, pad=1, stride=1, bias=True):
+        """建立卷積 + ReLU + BatchNorm 的基本卷積模組。"""
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size, stride=stride, padding=pad, bias=bias),
@@ -11,10 +14,12 @@ class ConvBlock(nn.Module):
         )
 
     def forward(self, x):
+        """執行區塊中的連續運算。"""
         return self.block(x)
 
 class BallTrackerNet(nn.Module):
     def __init__(self, input_channels=3, out_channels=14):
+        """TrackNet 主體架構，輸入多影格堆疊輸出多通道熱度圖。"""
         super().__init__()
         self.out_channels = out_channels
         self.input_channels = input_channels
@@ -47,6 +52,7 @@ class BallTrackerNet(nn.Module):
         self._init_weights()
                   
     def forward(self, x):
+        """依序通過編碼與解碼卷積層，產生輸出特徵圖。"""
         x = self.conv1(x)
         x = self.conv2(x)    
         x = self.pool1(x)
@@ -74,6 +80,7 @@ class BallTrackerNet(nn.Module):
         return x
     
     def _init_weights(self):
+        """以均勻分布初始化卷積權重，並重設 BatchNorm 參數。"""
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
                 nn.init.uniform_(module.weight, -0.05, 0.05)

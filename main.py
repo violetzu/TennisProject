@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""主程式：負責協同各模組完成網球賽事標註流程。"""
+
 import cv2
 from court_detection_net import CourtDetectorNet
 import numpy as np
@@ -17,9 +20,14 @@ COCO_SKELETON = [
     (11, 13), (13, 15), (12, 14), (14, 16)
 ]
 
+# COCO 骨架定義：用來連結為選手繪製關節骨架
+
 
 def draw_pose(image, keypoints, point_color=(0, 255, 255), line_color=(255, 0, 255)):
-    """Draw pose keypoints and skeleton on an image."""
+    """Draw pose keypoints and skeleton on an image.
+
+    在畫面上描繪偵測到的關節位置與骨架連線。
+    """
     if keypoints is None:
         return image
 
@@ -38,6 +46,7 @@ def draw_pose(image, keypoints, point_color=(0, 255, 255), line_color=(255, 0, 2
 
 
 def read_video(path_video):
+    """讀取影片並依序擷取所有影格。"""
     cap = cv2.VideoCapture(path_video)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     frames = []
@@ -51,6 +60,7 @@ def read_video(path_video):
     return frames, fps
 
 def get_court_img():
+    """生成網球場示意圖，提供小地圖繪製使用。"""
     court_reference = CourtReference()
     court = court_reference.build_court_reference()
     court = cv2.dilate(court, np.ones((10, 10), dtype=np.uint8))
@@ -73,6 +83,11 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
         trace: the length of ball trace
     :return
         imgs_res: list of resulting images
+
+    主要迴圈會依場景逐格完成：
+        * 將網球與選手資訊繪製在原始畫面上
+        * 透過單應矩陣將資料投影到小地圖
+        * 對有追蹤結果的片段增加球軌跡與落點標記
     """
     imgs_res = []
     width_minimap = 166
@@ -91,7 +106,7 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
                 img_res = frames[i]
                 inv_mat = homography_matrices[i]
 
-                # draw ball trajectory
+                # 繪製球軌跡（含歷史點或當前位置）
                 if ball_track[i][0]:
                     if draw_trace:
                         for j in range(0, trace):
@@ -111,7 +126,7 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
                               thickness=2,
                               color=(0, 255, 0))
 
-                # draw court keypoints
+                # 顯示偵測到的球場關鍵點
                 if kps_court[i] is not None:
                     for j in range(len(kps_court[i])):
                         img_res = cv2.circle(img_res, (int(kps_court[i][j][0, 0]), int(kps_court[i][j][0, 1])),
@@ -119,7 +134,7 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
 
                 height, width, _ = img_res.shape
 
-                # draw bounce in minimap
+                # 在小地圖上標記球的彈跳點
                 if i in bounces and inv_mat is not None:
                     ball_point = ball_track[i]
                     ball_point = np.array(ball_point, dtype=np.float32).reshape(1, 1, 2)
@@ -129,7 +144,7 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
 
                 minimap = court_img.copy()
 
-                # draw persons
+                # 繪製選手框線與姿態，並投影至小地圖
                 persons = persons_top[i] + persons_bottom[i]                    
                 for j, person in enumerate(persons):
                     if len(person[0]) > 0:
@@ -155,6 +170,7 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
     return imgs_res        
  
 def write(imgs_res, fps, path_output_video):
+    """以指定的 FPS 將處理後影格輸出成影片。"""
     height, width = imgs_res[0].shape[:2]
     out = cv2.VideoWriter(path_output_video, cv2.VideoWriter_fourcc(*'DIVX'), fps, (width, height))
     for num in range(len(imgs_res)):
@@ -189,7 +205,7 @@ if __name__ == '__main__':
     person_detector = PersonDetector(device)
     persons_top, persons_bottom = person_detector.track_players(frames, homography_matrices, filter_players=False)
 
-    # bounce detection
+    # Bounce 偵測：運用球座標序列判斷球是否觸地
     bounce_detector = BounceDetector(args.path_bounce_model)
     x_ball = [x[0] for x in ball_track]
     y_ball = [x[1] for x in ball_track]
@@ -199,8 +215,6 @@ if __name__ == '__main__':
                     draw_trace=True)
 
     write(imgs_res, fps, args.path_output_video)
-
-
 
 
 

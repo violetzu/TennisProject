@@ -1,3 +1,5 @@
+"""彈跳偵測模組：結合 CatBoost 模型判斷球是否觸地。"""
+
 import catboost as ctb
 import pandas as pd
 import numpy as np
@@ -6,15 +8,18 @@ from scipy.spatial import distance
 
 class BounceDetector:
     def __init__(self, path_model=None):
+        """初始化 CatBoost 模型並設定觸地判斷閾值。"""
         self.model = ctb.CatBoostRegressor()
         self.threshold = 0.45
         if path_model:
             self.load_model(path_model)
         
     def load_model(self, path_model):
+        """載入序列化的 CatBoost 模型。"""
         self.model.load_model(path_model)
     
     def prepare_features(self, x_ball, y_ball):
+        """根據球的座標序列建立模型所需的特徵欄位。"""
         labels = pd.DataFrame({'frame': range(len(x_ball)), 'x-coordinate': x_ball, 'y-coordinate': y_ball})
         
         num = 3
@@ -48,6 +53,7 @@ class BounceDetector:
         return features, list(labels['frame'])
     
     def predict(self, x_ball, y_ball, smooth=True):
+        """輸出觸地影格集合，可選擇先進行序列平滑。"""
         if smooth:
             x_ball, y_ball = self.smooth_predictions(x_ball, y_ball)
         features, num_frames = self.prepare_features(x_ball, y_ball)
@@ -59,9 +65,11 @@ class BounceDetector:
         return set(frames_bounce)
     
     def smooth_predictions(self, x_ball, y_ball):
+        """利用插值外推填補短暫遺失的球軌跡。"""
         is_none = [int(x is None) for x in x_ball]
         interp = 5
         counter = 0
+        # 從可外推的位置開始，逐格檢查是否需要補點
         for num in range(interp, len(x_ball)-1):
             if not x_ball[num] and sum(is_none[num-interp:num]) == 0 and counter < 3:
                 x_ext, y_ext = self.extrapolate(x_ball[num-interp:num], y_ball[num-interp:num])
@@ -78,6 +86,7 @@ class BounceDetector:
         return x_ball, y_ball
 
     def extrapolate(self, x_coords, y_coords):
+        """透過三次樣條外推下一筆球座標。"""
         xs = list(range(len(x_coords)))
         func_x = CubicSpline(xs, x_coords, bc_type='natural')
         x_ext = func_x(len(x_coords))
@@ -86,6 +95,7 @@ class BounceDetector:
         return float(x_ext), float(y_ext)    
 
     def postprocess(self, ind_bounce, preds):
+        """濾除相鄰結果，只保留信心最高的觸地點。"""
         ind_bounce_filtered = [ind_bounce[0]]
         for i in range(1, len(ind_bounce)):
             if (ind_bounce[i] - ind_bounce[i-1]) != 1:
@@ -94,5 +104,3 @@ class BounceDetector:
             elif preds[ind_bounce[i]] > preds[ind_bounce[i-1]]:
                 ind_bounce_filtered[-1] = ind_bounce[i]
         return ind_bounce_filtered
-
-

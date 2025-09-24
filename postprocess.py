@@ -1,3 +1,5 @@
+"""後處理工具：提供線段交會與關鍵點修正等輔助函式。"""
+
 import cv2
 import numpy as np
 from sympy import Line
@@ -8,6 +10,8 @@ from sympy.geometry.point import Point2D
 def line_intersection(line1, line2):
     """
     Find 2 lines intersection point
+
+    計算兩條線段的交點，若存在則回傳座標。
     """
     l1 = Line((line1[0], line1[1]), (line1[2], line1[3]))
     l2 = Line((line2[0], line2[1]), (line2[2], line2[3]))
@@ -20,6 +24,7 @@ def line_intersection(line1, line2):
     return point 
 
 def refine_kps(img, x_ct, y_ct, crop_size=40):
+    """透過局部線段偵測修正球場關鍵點座標。"""
     refined_x_ct, refined_y_ct = x_ct, y_ct
     
     img_height, img_width = img.shape[:2]
@@ -45,6 +50,7 @@ def refine_kps(img, x_ct, y_ct, crop_size=40):
     return refined_y_ct, refined_x_ct
 
 def detect_lines(image):
+    """在裁切區域內找出可能的線段候選。"""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.threshold(gray, 155, 255, cv2.THRESH_BINARY)[1]
     lines = cv2.HoughLinesP(gray, 1, np.pi / 180, 30, minLineLength=10, maxLineGap=30)
@@ -57,6 +63,7 @@ def detect_lines(image):
     return lines
 
 def merge_lines(lines):
+    """將距離相近的線段合併，避免重複計算。"""
     lines = sorted(lines, key=lambda item: item[0])
     mask = [True] * len(lines)
     new_lines = []
@@ -70,8 +77,8 @@ def merge_lines(lines):
                     dist1 = distance.euclidean((x1, y1), (x3, y3))
                     dist2 = distance.euclidean((x2, y2), (x4, y4))
                     if dist1 < 20 and dist2 < 20:
+                        # 將靠得很近的線段平均化為單一代表線
                         line = np.array([int((x1+x3)/2), int((y1+y3)/2), int((x2+x4)/2), int((y2+y4)/2)])
                         mask[i + j + 1] = False
             new_lines.append(line)  
     return new_lines       
-

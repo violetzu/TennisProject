@@ -1,3 +1,5 @@
+"""球場偵測模組：輸出球場關鍵點與單應矩陣。"""
+
 import cv2
 import numpy as np
 import torch
@@ -9,6 +11,7 @@ from homography import get_trans_matrix, refer_kps
 
 class CourtDetectorNet():
     def __init__(self, path_model=None,  device='cuda'):
+        """載入訓練好的網路並設定推論裝置。"""
         self.model = BallTrackerNet(out_channels=15)
         self.device = device
         if path_model:
@@ -17,6 +20,7 @@ class CourtDetectorNet():
             self.model.eval()
             
     def infer_model(self, frames):
+        """逐格推論球場關鍵點並估計單應矩陣。"""
         output_width = 640
         output_height = 360
         scale = 2
@@ -25,6 +29,7 @@ class CourtDetectorNet():
         matrixes_res = []
         for num_frame, image in enumerate(tqdm(frames)):
             img = cv2.resize(image, (output_width, output_height))
+            # 正規化影像並整理成模型輸入格式
             inp = (img.astype(np.float32) / 255.)
             inp = torch.tensor(np.rollaxis(inp, 2, 0))
             inp = inp.unsqueeze(0)
@@ -36,12 +41,14 @@ class CourtDetectorNet():
             for kps_num in range(14):
                 heatmap = (pred[kps_num]*255).astype(np.uint8)
                 ret, heatmap = cv2.threshold(heatmap, 170, 255, cv2.THRESH_BINARY)
+                # 以霍夫圓找出各個球場關鍵點
                 circles = cv2.HoughCircles(heatmap, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=2,
                                            minRadius=10, maxRadius=25)
                 if circles is not None:
                     x_pred = circles[0][0][0]*scale
                     y_pred = circles[0][0][1]*scale
                     if kps_num not in [8, 12, 9]:
+                        # 大部分點再透過局部影像進行線段交會微調
                         x_pred, y_pred = refine_kps(image, int(y_pred), int(x_pred), crop_size=40)
                     points.append((x_pred, y_pred))                
                 else:

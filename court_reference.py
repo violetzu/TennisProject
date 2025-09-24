@@ -1,3 +1,5 @@
+"""球場參考資料：提供標準網球場幾何資訊。"""
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -6,6 +8,8 @@ import matplotlib.pyplot as plt
 class CourtReference:
     """
     Court reference model
+
+    提供網球場線條、關鍵點與遮罩等靜態資訊。
     """
     def __init__(self):
         self.baseline_top = ((286, 561), (1379, 561))
@@ -25,6 +29,7 @@ class CourtReference:
                           *self.left_inner_line, *self.right_inner_line,
                           *self.top_inner_line, *self.bottom_inner_line,
                           *self.middle_line]
+        # key_points 順序與參考圖一致，供單應矩陣應用
         
         self.border_points = [*self.baseline_top, *self.baseline_bottom[::-1]]
 
@@ -61,6 +66,8 @@ class CourtReference:
     def build_court_reference(self):
         """
         Create court reference image using the lines positions
+
+        以線段座標建立灰階場地示意圖，後續可做小地圖繪製。
         """
         court = np.zeros((self.court_height + 2 * self.top_bottom_border, self.court_width + 2 * self.right_left_border), dtype=np.uint8)
         cv2.line(court, *self.baseline_top, 1, self.line_width)
@@ -82,6 +89,8 @@ class CourtReference:
     def get_important_lines(self):
         """
         Returns all lines of the court
+
+        回傳場地所有主線段，便於外部使用。
         """
         lines = [*self.baseline_top, *self.baseline_bottom, *self.net, *self.left_court_line, *self.right_court_line,
                  *self.left_inner_line, *self.right_inner_line, *self.middle_line,
@@ -89,12 +98,15 @@ class CourtReference:
         return lines
 
     def get_extra_parts(self):
+        """取得球場上下延伸線段的端點座標。"""
         parts = [self.top_extra_part, self.bottom_extra_part]
         return parts
 
     def save_all_court_configurations(self):
         """
         Create all configurations of 4 points on court reference
+
+        將所有四點組合標註在場地圖上並輸出為影像檔。
         """
         for i, conf in self.court_conf.items():
             c = cv2.cvtColor(255 - self.court, cv2.COLOR_GRAY2BGR)
@@ -105,14 +117,19 @@ class CourtReference:
     def get_court_mask(self, mask_type=0):
         """
         Get mask of the court
+
+        根據指定型態回傳不同區域的遮罩。
         """
         mask = np.ones_like(self.court)
         if mask_type == 1:  # Bottom half court
+            # 只保留下半場，方便標記底線選手
             # mask[:self.net[0][1] - 1000, :] = 0
             mask[:self.net[0][1], :] = 0
         elif mask_type == 2:  # Top half court
+            # 只保留上半場
             mask[self.net[0][1]:, :] = 0
         elif mask_type == 3: # court without margins
+            # 去除外圍邊界，留下正式場地範圍
             mask[:self.baseline_top[0][1], :] = 0
             mask[self.baseline_bottom[0][1]:, :] = 0
             mask[:, :self.left_court_line[0][0]] = 0
