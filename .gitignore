@@ -1,0 +1,5 @@
+input/
+__pycache__/
+model/
+*.mp4
+for me.md
