@@ -9,6 +9,34 @@ from utils import scene_detect
 import argparse
 import torch
 
+
+COCO_SKELETON = [
+    (0, 1), (0, 2), (1, 3), (2, 4),
+    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
+    (5, 11), (6, 12), (11, 12),
+    (11, 13), (13, 15), (12, 14), (14, 16)
+]
+
+
+def draw_pose(image, keypoints, point_color=(0, 255, 255), line_color=(255, 0, 255)):
+    """Draw pose keypoints and skeleton on an image."""
+    if keypoints is None:
+        return image
+
+    kps = np.array(keypoints, dtype=np.int32)
+    for x, y in kps:
+        if x > 0 and y > 0:
+            cv2.circle(image, (int(x), int(y)), 3, point_color, -1)
+
+    for start, end in COCO_SKELETON:
+        if start < len(kps) and end < len(kps):
+            x1, y1 = kps[start]
+            x2, y2 = kps[end]
+            if x1 > 0 and y1 > 0 and x2 > 0 and y2 > 0:
+                cv2.line(image, (int(x1), int(y1)), (int(x2), int(y2)), line_color, 2)
+    return image
+
+
 def read_video(path_video):
     cap = cv2.VideoCapture(path_video)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -108,6 +136,8 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
                         person_bbox = list(person[0])
                         img_res = cv2.rectangle(img_res, (int(person_bbox[0]), int(person_bbox[1])),
                                                 (int(person_bbox[2]), int(person_bbox[3])), [255, 0, 0], 2)
+                        if len(person) > 2:
+                            img_res = draw_pose(img_res, person[2])
 
                         # transmit person point to minimap
                         person_point = list(person[1])

@@ -9,3 +9,4 @@ sympy
 tqdm
 opencv_python
 catboost
+ultralytics
