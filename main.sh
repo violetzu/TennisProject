@@ -21,33 +21,33 @@ BOUNCE_URL="https://drive.google.com/uc?export=download&id=1Eo5HDnAQE8y_FbOftKZ8
 # ====== 檢查模型檔案 ======
 if [ ! -f "$BALL_DIR/$BALL_MODEL" ]; then
   echo "下載 Ball 模型..."
-  wget -O "$BALL_DIR/$BALL_MODEL" "$BALL_URL"
+  wget -q --show-progress -O "$BALL_DIR/$BALL_MODEL" "$BALL_URL"
 fi
 
 if [ ! -f "$COURT_DIR/$COURT_MODEL" ]; then
   echo "下載 Court 模型..."
-  wget -O "$COURT_DIR/$COURT_MODEL" "$COURT_URL"
+  wget -q --show-progress -O "$COURT_DIR/$COURT_MODEL" "$COURT_URL"
 fi
 
 if [ ! -f "$BOUNCE_DIR/$BOUNCE_MODEL" ]; then
   echo "下載 Bounce 模型..."
-  wget -O "$BOUNCE_DIR/$BOUNCE_MODEL" "$BOUNCE_URL"
+  wget -q --show-progress -O "$BOUNCE_DIR/$BOUNCE_MODEL" "$BOUNCE_URL"
 fi
 
 # ====== 影片清單 ======
 declare -A VIDEO_URLS=(
-  ["tennis1.mp4"]="https://drive.google.com/uc?export=download&id=1ttWh0nV9lqFnOBOOA92f3X_uMuRACLZ5"
-  ["tennis2.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
-  ["tennis3.mp4"]="https://drive.google.com/uc?export=download&id=1ESsqFBvpI3X3HQJRggmtCjTnYrkwKlEI"
-  ["tennis4.mp4"]="https://drive.google.com/uc?export=download&id=1MmoShAfNSuhsFhm6JohbaWi2Dr9WJk2I"
-  ["tennis5.mp4"]="https://drive.google.com/uc?export=download&id=1tqz4EVIVq08MocZzFuj3UHxfuai-b9ZG"
+  ["最好辨識的.mp4"]="https://drive.google.com/uc?export=download&id=1ttWh0nV9lqFnOBOOA92f3X_uMuRACLZ5"
+  ["抓不到落點的.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
+  ["巨人評審.mp4"]="https://drive.google.com/uc?export=download&id=1ESsqFBvpI3X3HQJRggmtCjTnYrkwKlEI"
+  ["哪來那麼多球僮.mp4"]="https://drive.google.com/uc?export=download&id=1MmoShAfNSuhsFhm6JohbaWi2Dr9WJk2I"
+  ["會動的場地.mp4"]="https://drive.google.com/uc?export=download&id=1tqz4EVIVq08MocZzFuj3UHxfuai-b9ZG"
 )
 
 # ====== 檢查 & 下載影片 ======
 for video in "${!VIDEO_URLS[@]}"; do
   if [ ! -f "$INPUT_DIR/$video" ]; then
     echo "下載 $video ..."
-    wget -O "$INPUT_DIR/$video" "${VIDEO_URLS[$video]}"
+    wget -q --show-progress -O "$INPUT_DIR/$video" "${VIDEO_URLS[$video]}"
   fi
 done
 
