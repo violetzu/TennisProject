@@ -1,5 +1,6 @@
 ## 重要!!!!
 有換模型的話直接放到雲端然後改main.sh的對應檔名跟連結!!!!!
+https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link
 增加測試影片也是
 
 網球資料集
