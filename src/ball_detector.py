@@ -1,6 +1,6 @@
 """球體偵測模組：利用 TrackNet 模型推論球的座標位置。"""
 
-from .tracknet import BallTrackerNet
+from tracknet import BallTrackerNet
 import torch
 import cv2
 import numpy as np
@@ -68,7 +68,7 @@ class BallDetector:
                                    maxRadius=7)
         x, y = None, None
         if circles is not None:
-            if image is not None:
+            if image is not None: #解析度隨影像變更
                 h,w=image.shape[:2]
             else:
                 h,w=self.height,self.width
