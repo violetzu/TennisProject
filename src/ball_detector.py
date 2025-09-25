@@ -1,6 +1,6 @@
 """球體偵測模組：利用 TrackNet 模型推論球的座標位置。"""
 
-from tracknet import BallTrackerNet
+from .tracknet import BallTrackerNet
 import torch
 import cv2
 import numpy as np
