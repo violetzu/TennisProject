@@ -60,5 +60,5 @@ for video in "${!VIDEO_URLS[@]}"; do
     --path_court_model "$COURT_DIR/$COURT_MODEL" \
     --path_bounce_model "$BOUNCE_DIR/$BOUNCE_MODEL" \
     --path_input_video "$INPUT_DIR/$video" \
-    --path_output_video "$OUTPUT_DIR/${base}_out.mp4"
+    --path_output_video "$OUTPUT_DIR/${base}_out.mp4" #可直接改avi或mp4
 done

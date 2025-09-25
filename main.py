@@ -7,6 +7,7 @@ from src import CourtDetectorNet, CourtReference, BounceDetector, PersonDetector
 from src.utils import scene_detect
 import argparse
 import torch
+import os
 
 
 COCO_SKELETON = [
@@ -54,6 +55,24 @@ def read_video(path_video):
             break    
     cap.release()
     return frames, fps
+
+def write_video(imgs_res, fps, path_output_video):
+    """以指定的 FPS 將處理後影格輸出成影片，依副檔名自動選擇編碼器。"""
+    height, width = imgs_res[0].shape[:2]
+    # 副檔名 → fourcc 對應表
+    codec_map = {
+        '.mp4': 'mp4v',
+        '.m4v': 'mp4v',
+        '.avi': 'DIVX'
+    }
+    ext = os.path.splitext(path_output_video)[1].lower()
+    fourcc_str = codec_map.get(ext, 'XVID')  # 預設用 XVID
+    fourcc = cv2.VideoWriter_fourcc(*fourcc_str)
+
+    out = cv2.VideoWriter(path_output_video, fourcc, fps, (width, height))
+    for frame in imgs_res:
+        out.write(frame)
+    out.release()   
 
 def get_court_img():
     """生成網球場示意圖，提供小地圖繪製使用。"""
@@ -165,14 +184,7 @@ def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, pe
             imgs_res = imgs_res + frames[scenes[num_scene][0]:scenes[num_scene][1]] 
     return imgs_res        
  
-def write(imgs_res, fps, path_output_video):
-    """以指定的 FPS 將處理後影格輸出成影片。"""
-    height, width = imgs_res[0].shape[:2]
-    out = cv2.VideoWriter(path_output_video, cv2.VideoWriter_fourcc(*'DIVX'), fps, (width, height))
-    for num in range(len(imgs_res)):
-        frame = imgs_res[num]
-        out.write(frame)
-    out.release()    
+
 
 
 if __name__ == '__main__':
@@ -190,9 +202,9 @@ if __name__ == '__main__':
     scenes = scene_detect(args.path_input_video)    
 
     print('ball detection')
-    ball_detector = BallDetector(device)
+    ball_detector = BallDetector(args.path_ball_track_model, device)
     ball_track = ball_detector.infer_model(frames)
-    
+
     print('court detection')
     court_detector = CourtDetectorNet(args.path_court_model, device)
     homography_matrices, kps_court = court_detector.infer_model(frames)
@@ -210,7 +222,7 @@ if __name__ == '__main__':
     imgs_res = main(frames, scenes, bounces, ball_track, homography_matrices, kps_court, persons_top, persons_bottom,
                     draw_trace=True)
 
-    write(imgs_res, fps, args.path_output_video)
+    write_video(imgs_res, fps, args.path_output_video)
 
 
 

@@ -5,7 +5,7 @@ from tqdm import tqdm
 from scipy.spatial import distance
 
 class BallDetector:
-    def __init__(self, device="cpu", path_model = "./model/ball/yolov8_ball_09250900_best.pt", conf: float = 0.25, max_dist: float = 80.0):
+    def __init__(self, path_model=None, device="cpu", conf: float = 0.25, max_dist: float = 80.0):
         """
         以 YOLOv8 偵測網球位置（不縮放輸入影像）。
         :param path_model: 你重訓後的 YOLOv8 權重（.pt）
