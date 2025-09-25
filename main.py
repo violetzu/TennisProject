@@ -193,6 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--path_ball_track_model', type=str, help='path to pretrained model for ball detection')
     parser.add_argument('--path_court_model', type=str, help='path to pretrained model for court detection')
     parser.add_argument('--path_bounce_model', type=str, help='path to pretrained model for bounce detection')
+    parser.add_argument('--path_person_model', type=str, help='path to pretrained model for person detection')
     parser.add_argument('--path_input_video', type=str, help='path to input video')
     parser.add_argument('--path_output_video', type=str, help='path to output video')
     args = parser.parse_args()
@@ -210,7 +211,7 @@ if __name__ == '__main__':
     homography_matrices, kps_court = court_detector.infer_model(frames)
 
     print('person detection')
-    person_detector = PersonDetector(device)
+    person_detector = PersonDetector(args.path_person_model, device)
     persons_top, persons_bottom = person_detector.track_players(frames, homography_matrices, filter_players=False)
 
     # Bounce 偵測：運用球座標序列判斷球是否觸地

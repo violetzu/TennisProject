@@ -4,6 +4,7 @@
 BALL_DIR="./model/ball"
 COURT_DIR="./model/court"
 BOUNCE_DIR="./model/bounce"
+PERSON_DIR="./model/person"
 INPUT_DIR="./input"
 OUTPUT_DIR="./output"
 
@@ -13,6 +14,7 @@ mkdir -p "$BALL_DIR" "$COURT_DIR" "$BOUNCE_DIR" "$INPUT_DIR" "$OUTPUT_DIR"
 BALL_MODEL="yolov8_ball_09250900_best.pt"
 COURT_MODEL="court.pt"
 BOUNCE_MODEL="ctb_regr_bounce.cbm"
+PERSON_MODEL="yolov8n-pose.pt"
 
 BALL_URL="https://drive.google.com/uc?export=download&id=10DHUZL3RQuNMA4gAxfPzOhqVL-JLCJLf"
 COURT_URL="https://drive.google.com/uc?export=download&id=1f-Co64ehgq4uddcQm1aFBDtbnyZhQvgG"
@@ -59,6 +61,7 @@ for video in "${!VIDEO_URLS[@]}"; do
     --path_ball_track_model "$BALL_DIR/$BALL_MODEL" \
     --path_court_model "$COURT_DIR/$COURT_MODEL" \
     --path_bounce_model "$BOUNCE_DIR/$BOUNCE_MODEL" \
+    --path_person_model "$PERSON_DIR/$PERSON_MODEL" \
     --path_input_video "$INPUT_DIR/$video" \
     --path_output_video "$OUTPUT_DIR/${base}_out.mp4" #可直接改avi或mp4
 done

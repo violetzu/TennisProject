@@ -11,9 +11,9 @@ from .court_reference import CourtReference
 
 
 class PersonDetector():
-    def __init__(self, device="cpu", model_name="../model/yolo/yolov8n-pose.pt"):
+    def __init__(self, path_model=None, device="cpu"):
         self.device = device
-        self.detection_model = YOLO(model_name)
+        self.detection_model = YOLO(path_model)
         self.detection_model.to(self.device)
 
         self.court_ref = CourtReference()
