@@ -1,9 +1,8 @@
 """工具函式：提供影片場景切割功能。"""
 
-from scenedetect.video_manager import VideoManager
-from scenedetect.scene_manager import SceneManager
-from scenedetect.stats_manager import StatsManager
+from scenedetect import open_video, SceneManager
 from scenedetect.detectors import ContentDetector
+from scenedetect.stats_manager import StatsManager
 
 def scene_detect(path_video):
     """
@@ -11,19 +10,26 @@ def scene_detect(path_video):
 
     根據顏色直方圖變化切分影片，取得各段場景範圍。
     """
-    video_manager = VideoManager([path_video])
+    video = open_video(path_video)               # 取代 VideoManager
     stats_manager = StatsManager()
     scene_manager = SceneManager(stats_manager)
     scene_manager.add_detector(ContentDetector())
-    base_timecode = video_manager.get_base_timecode()
 
-    video_manager.set_downscale_factor()
-    video_manager.start()
-    scene_manager.detect_scenes(frame_source=video_manager)
-    scene_list = scene_manager.get_scene_list(base_timecode)
+    # 直接把 video 丟進去偵測（不再使用 set_downscale_factor / start）
+    scene_manager.detect_scenes(video=video)
 
-    if scene_list == []:
+    # v0.6+ 不再需要 base_timecode 參數
+    scene_list = scene_manager.get_scene_list()
+
+    if not scene_list:
         # 若場景偵測失敗，退回整部影片視為單段
-        scene_list = [(video_manager.get_base_timecode(), video_manager.get_current_timecode())]
-    scenes = [[x[0].frame_num, x[1].frame_num]for x in scene_list]    
+        start_tc = getattr(video, 'base_timecode', None)
+        end_tc = getattr(video, 'duration', None)
+        # 安全回退：若屬性不存在就用 0 ~ 0
+        if start_tc is None or end_tc is None:
+            return [[0, 0]]
+        return [[start_tc.get_frames(), end_tc.get_frames()]]
+
+    # 將 Timecode 轉成 frame index（v0.6+ 用 get_frames()）
+    scenes = [[start.get_frames(), end.get_frames()] for start, end in scene_list]
     return scenes
