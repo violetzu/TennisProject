@@ -23,11 +23,15 @@ class CourtDetectorNet():
         """逐格推論球場關鍵點並估計單應矩陣。"""
         output_width = 640
         output_height = 360
-        scale = 2
+
         
         kps_res = []
         matrixes_res = []
         for num_frame, image in enumerate(tqdm(frames)):
+            h, w = image.shape[:2]   #依影像解析度變化
+            scale_x = w / output_width
+            scale_y = h / output_height
+
             img = cv2.resize(image, (output_width, output_height))
             # 正規化影像並整理成模型輸入格式
             inp = (img.astype(np.float32) / 255.)
@@ -45,8 +49,8 @@ class CourtDetectorNet():
                 circles = cv2.HoughCircles(heatmap, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=2,
                                            minRadius=10, maxRadius=25)
                 if circles is not None:
-                    x_pred = circles[0][0][0]*scale
-                    y_pred = circles[0][0][1]*scale
+                    x_pred = circles[0][0][0]*scale_x
+                    y_pred = circles[0][0][1]*scale_y
                     if kps_num not in [8, 12, 9]:
                         # 大部分點再透過局部影像進行線段交會微調
                         x_pred, y_pred = refine_kps(image, int(y_pred), int(x_pred), crop_size=40)
