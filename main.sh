@@ -34,7 +34,7 @@ if [ ! -f "$BOUNCE_DIR/$BOUNCE_MODEL" ]; then
   wget -q --show-progress -O "$BOUNCE_DIR/$BOUNCE_MODEL" "$BOUNCE_URL"
 fi
 
-# ====== 影片清單 ======
+# ====== 影片清單(前面是要存到電腦的名字，不用跟原檔名一樣，但要跟原有的不一樣，不然重複就不會再下載了) ======
 declare -A VIDEO_URLS=(
   ["最好辨識的.mp4"]="https://drive.google.com/uc?export=download&id=1ttWh0nV9lqFnOBOOA92f3X_uMuRACLZ5"
   ["抓不到落點的.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
