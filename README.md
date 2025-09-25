@@ -1,3 +1,10 @@
+## 重要!!!!
+有換模型的話直接放到雲端然後改main.sh的對應檔名跟連結!!!!!
+增加測試影片也是
+
+網球資料集
+https://universe.roboflow.com/viren-dhanwani/tennis-ball-detection/dataset/6
+
 ## 檔案架構
 ```sh
 TennisProject/
@@ -19,5 +26,3 @@ TennisProject/
 
 ```
 
-網球資料集
-https://universe.roboflow.com/viren-dhanwani/tennis-ball-detection/dataset/6
