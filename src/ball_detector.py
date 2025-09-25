@@ -1,6 +1,6 @@
 """球體偵測模組：利用 TrackNet 模型推論球的座標位置。"""
 
-from .tracknet import BallTrackerNet
+from tracknet import BallTrackerNet
 import torch
 import cv2
 import numpy as np
@@ -42,12 +42,12 @@ class BallDetector:
 
             out = self.model(torch.from_numpy(inp).float().to(self.device))
             output = out.argmax(dim=1).detach().cpu().numpy()
-            x_pred, y_pred = self.postprocess(output, prev_pred)
+            x_pred, y_pred = self.postprocess(output, prev_pred,image=frames[num])
             prev_pred = [x_pred, y_pred]
             ball_track.append((x_pred, y_pred))
         return ball_track
 
-    def postprocess(self, feature_map, prev_pred, scale=3, max_dist=80):
+    def postprocess(self, feature_map, prev_pred, max_dist=80,image=None):
         """
         :params
             feature_map: feature map with shape (1,360,640)
@@ -68,15 +68,21 @@ class BallDetector:
                                    maxRadius=7)
         x, y = None, None
         if circles is not None:
+            if image is not None: #解析度隨影像變更
+                h,w=image.shape[:2]
+            else:
+                h,w=self.height,self.width
+            scale_x=w/self.width
+            scale_y=h/self.height
             if prev_pred[0]:
                 for i in range(len(circles[0])):
-                    x_temp = circles[0][i][0]*scale
-                    y_temp = circles[0][i][1]*scale
+                    x_temp = circles[0][i][0]*scale_x
+                    y_temp = circles[0][i][1]*scale_y
                     dist = distance.euclidean((x_temp, y_temp), prev_pred)
                     if dist < max_dist:
                         x, y = x_temp, y_temp
                         break                
             else:
-                x = circles[0][0][0]*scale
-                y = circles[0][0][1]*scale
+                x = circles[0][0][0]*scale_x
+                y = circles[0][0][1]*scale_y
         return x, y
