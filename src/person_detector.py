@@ -7,11 +7,11 @@ from scipy.spatial import distance
 from tqdm import tqdm
 from ultralytics import YOLO
 
-from court_reference import CourtReference
+from .court_reference import CourtReference
 
 
 class PersonDetector():
-    def __init__(self, device="cpu", model_name="yolov8n-pose.pt"):
+    def __init__(self, device="cpu", model_name="../model/yolo/yolov8n-pose.pt"):
         self.device = device
         self.detection_model = YOLO(model_name)
         self.detection_model.to(self.device)

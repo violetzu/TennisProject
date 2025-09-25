@@ -1,6 +1,6 @@
 """單應矩陣估計：根據球場關鍵點建立投影轉換。"""
 
-from court_reference import CourtReference
+from .court_reference import CourtReference
 import numpy as np
 import cv2
 from scipy.spatial import distance

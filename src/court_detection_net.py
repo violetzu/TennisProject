@@ -3,11 +3,11 @@
 import cv2
 import numpy as np
 import torch
-from tracknet import BallTrackerNet
+from .tracknet import BallTrackerNet
 import torch.nn.functional as F
 from tqdm import tqdm
-from postprocess import refine_kps
-from homography import get_trans_matrix, refer_kps
+from .postprocess import refine_kps
+from .homography import get_trans_matrix, refer_kps
 
 class CourtDetectorNet():
     def __init__(self, path_model=None,  device='cuda'):

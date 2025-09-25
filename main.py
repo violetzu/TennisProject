@@ -2,13 +2,9 @@
 """主程式：負責協同各模組完成網球賽事標註流程。"""
 
 import cv2
-from court_detection_net import CourtDetectorNet
 import numpy as np
-from court_reference import CourtReference
-from bounce_detector import BounceDetector
-from person_detector import PersonDetector
-from ball_detector import BallDetector
-from utils import scene_detect
+from src import CourtDetectorNet, CourtReference, BounceDetector, PersonDetector, BallDetector
+from src.utils import scene_detect
 import argparse
 import torch
 

@@ -1,7 +1,6 @@
 __pycache__/
-input/
-model/
 *.mp4
 *.pt
+*.cbm
 for me.md
 common/
