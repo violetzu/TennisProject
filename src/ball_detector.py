@@ -68,7 +68,7 @@ class BallDetector:
                                    maxRadius=7)
         x, y = None, None
         if circles is not None:
-            if image is not None: #解析度隨影像變更
+            if image is not None: #影像解析度隨影像變更
                 h,w=image.shape[:2]
             else:
                 h,w=self.height,self.width
