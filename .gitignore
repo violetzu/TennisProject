@@ -2,7 +2,7 @@ __pycache__/
 *.mp4
 *.pt
 *.cbm
-*Identifier
+*.Identifier
 for me.md
 common/
 VideoPose3D/
