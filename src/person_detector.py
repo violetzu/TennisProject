@@ -1,331 +1,471 @@
-"""選手偵測與追蹤（防裁判版）：動態優先 + 框重疊比 + 站姿檢查。"""
+"""Player detection and tracking using YOLO + MediaPipe with court-aware filtering."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-import torch
-from scipy.spatial import distance
-from tqdm import tqdm
 from ultralytics import YOLO
 
+try:
+    import mediapipe as mp
+except ImportError as exc:  # pragma: no cover - runtime dependency
+    raise ImportError("mediapipe is required for PersonDetector") from exc
+
 from .court_reference import CourtReference
+from tqdm import tqdm
 
 
-class PersonDetector():
-    def __init__(self, path_model=None, device="cpu"):
+def crop_with_margin(
+    img: np.ndarray,
+    xyxy: Tuple[float, float, float, float],
+    margin: float = 0.15,
+) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+    h, w = img.shape[:2]
+    x1, y1, x2, y2 = map(float, xyxy)
+    bw, bh = x2 - x1, y2 - y1
+    cx, cy = x1 + bw / 2, y1 + bh / 2
+    side = max(bw, bh) * (1 + margin * 2)
+    x1n = int(max(0, cx - side / 2))
+    y1n = int(max(0, cy - side / 2))
+    x2n = int(min(w, cx + side / 2))
+    y2n = int(min(h, cy + side / 2))
+    crop = img[y1n:y2n, x1n:x2n].copy()
+    return crop, (x1n, y1n, x2n, y2n)
+
+
+@dataclass
+class PlayerDetection:
+    bbox: Tuple[int, int, int, int]
+    foot: Tuple[int, int]
+    landmarks: List[Tuple[float, float, float]]
+    world_landmarks: Optional[np.ndarray]
+    confidence: float
+    score: float
+    side: str  # "top" or "bottom"
+
+
+class PersonDetector:
+    """Detect and track two tennis players (top and bottom halves of the court)."""
+
+    def __init__(
+        self,
+        path_model: str,
+        device: str = "cpu",
+        confidence_threshold: float = 0.5,
+        resize_width: Optional[int] = None,
+    ) -> None:
         self.device = device
+        self.default_conf = confidence_threshold
+        self.resize_width = resize_width
         self.detection_model = YOLO(path_model)
         self.detection_model.to(self.device)
 
+        self.pose = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=confidence_threshold,
+            min_tracking_confidence=confidence_threshold,
+            smooth_landmarks=True,
+        )
+
         self.court_ref = CourtReference()
-        self.ref_top_court = self.court_ref.get_court_mask(2).astype(np.uint8)     # 0/1
-        self.ref_bottom_court = self.court_ref.get_court_mask(1).astype(np.uint8)  # 0/1
+        self.ref_top_mask = self.court_ref.get_court_mask(2).astype(np.uint8)
+        self.ref_bottom_mask = self.court_ref.get_court_mask(1).astype(np.uint8)
 
-        # 召回友善
+        # Tracking parameters (mirrored from original PersonDetector)
         self.default_imgsz = 1280
-        self.default_conf = 0.2
+        self.roi_erode_kernel = 9
+        self.gate_ratio = 0.28
+        self.overlap_thresh = 0.30
+        self.motion_decay = 0.8
+        self.motion_gain = 0.2
+        self.motion_weight = 0.35
+        self.pose_weight = 0.10
+        self.size_weight = 0.25
+        self.det_score_weight = 0.30
+        self.min_standing_ratio = 0.55
 
-        # 追蹤與動態評分
-        self.point_person_top = None
-        self.point_person_bottom = None
+        # Tracking states
+        self.point_person_top: Optional[np.ndarray] = None
+        self.point_person_bottom: Optional[np.ndarray] = None
         self.counter_top = 0
         self.counter_bottom = 0
         self.max_missing_frames = 10
-
-        # —— 這三個是新加的可調參 —— #
-        self.roi_erode_kernel = 9       # ROI 收縮（避免邊線/椅審）
-        self.gate_ratio = 0.28          # 追蹤 gate（影像高的比例）
-        self.overlap_thresh = 0.30      # 框與半場 ROI 的重疊比例最低門檻
-        self.motion_decay = 0.8         # 活動度指數遞減
-        self.motion_gain = 0.2          # 單幀位移注入比例
-        self.motion_weight = 0.35       # 活動度納入綜合分數的權重
-        self.pose_weight = 0.10         # 站姿一致性的權重
-        self.size_weight = 0.25         # 框高度正規化的權重
-        self.det_score_weight = 0.30    # 模型原始分數的權重
-        self.min_standing_ratio = 0.55  # 骨架高度 / 框高 的最低值（坐著會較小）
-
-        """
-        小調整建議
-        如果椅審還是偶爾混進來，把：
-        self.overlap_thresh 提高到 0.4~0.5；
-        self.roi_erode_kernel 調大到 11；
-        self.motion_weight 提到 0.45；
-        或把 self.min_standing_ratio 提到 0.6~0.65（坐姿更容易被扣分）。
-        若鏡頭穩、球員移動少，可把 self.gate_ratio 往上拉（0.3~0.35），追蹤更穩。
-        """
-
-
-        # 活動度記分（分別記 top / bottom）
         self.motion_energy_top = 0.0
         self.motion_energy_bottom = 0.0
+        self.last_record_top: Optional[dict] = None
+        self.last_record_bottom: Optional[dict] = None
+        self.fallback_decay = 0.85
 
-    # ---------- 基本偵測 ---------- #
-    def detect(self, image, person_min_score=None, imgsz=None):
-        conf_thr = self.default_conf if person_min_score is None else person_min_score
-        imgsz = self.default_imgsz if imgsz is None else imgsz
+        self.frame_size: Optional[Tuple[int, int]] = None
+        self.proc_size: Optional[Tuple[int, int]] = None
+        self.scale_x = 1.0
+        self.scale_y = 1.0
 
-        with torch.no_grad():
-            results = self.detection_model.predict(
-                image,
-                conf=conf_thr,
-                imgsz=imgsz,
-                device=self.device,
-                classes=[0],
-                agnostic_nms=True,
-                verbose=False
-            )
+    # --------------------------- utility helpers --------------------------- #
 
-        persons_boxes, probs, keypoints = [], [], []
-        if results:
-            result = results[0]
-            boxes = result.boxes.xyxy.cpu().numpy() if result.boxes is not None else []
-            scores = result.boxes.conf.cpu().numpy() if result.boxes is not None else []
-            kps = result.keypoints.xy.cpu().numpy() if getattr(result, "keypoints", None) is not None and result.keypoints is not None else []
-            for idx in range(len(boxes)):
-                persons_boxes.append(boxes[idx])
-                probs.append(float(scores[idx]))
-                keypoints.append(kps[idx] if len(kps) > idx else None)
-        return persons_boxes, probs, keypoints
-
-    # ---------- 小工具 ---------- #
-    @staticmethod
-    def _min_h_by_y(y, H):
-        return max(12, int(0.03 * H + (y / H) * 40))
+    def _prepare_sizes(self, frame: np.ndarray) -> np.ndarray:
+        h, w = frame.shape[:2]
+        if self.frame_size is None:
+            self.frame_size = (w, h)
+            if self.resize_width and self.resize_width > 0 and self.resize_width != w:
+                scale = self.resize_width / w
+                self.proc_size = (self.resize_width, int(round(h * scale)))
+                self.scale_x = w / self.proc_size[0]
+                self.scale_y = h / self.proc_size[1]
+            else:
+                self.proc_size = (w, h)
+                self.scale_x = 1.0
+                self.scale_y = 1.0
+        if self.proc_size is None:
+            self.proc_size = (w, h)
+        if (frame.shape[1], frame.shape[0]) != self.proc_size:
+            return cv2.resize(frame, self.proc_size)
+        return frame
 
     @staticmethod
-    def _bbox_to_int(b):
-        x1, y1, x2, y2 = b.astype(int)
-        return x1, y1, x2, y2
+    def _min_h_by_y(y: float, height: int) -> int:
+        return max(12, int(0.03 * height + (y / max(height, 1)) * 40))
 
     @staticmethod
-    def _safe_clip(v, lo, hi):
-        return int(np.clip(v, lo, hi))
+    def _safe_clip(value: float, lo: int, hi: int) -> int:
+        return int(np.clip(value, lo, hi))
 
     @staticmethod
-    def _kps_minmax_y(kps):
-        """
-        從關鍵點陣列取出最小 / 最大 y 值。
-        kps: numpy array shape (17,2) 或 None
-        """
-        if kps is None or not hasattr(kps, "shape"):
-            return None, None
-        if kps.ndim != 2 or kps.shape[1] < 2:
-            return None, None
-
-        ys = kps[:, 1]
-        ys = ys[np.isfinite(ys)]  # 過濾掉 NaN/inf
-        if ys.size == 0:
-            return None, None
-        return float(np.min(ys)), float(np.max(ys))
-
-
-    def _foot_point_from_kps(self, kps, bbox):
-        x1, y1, x2, y2 = self._bbox_to_int(bbox)
-        cx_bottom = (x1 + x2) * 0.5
-        y_bottom = y2
-        if kps is None:
-            return np.array([cx_bottom, y_bottom], dtype=np.float32)
-
-        def get(i):
-            try:
-                p = kps[i]
-                return p if p is not None and np.all(np.isfinite(p)) else None
-            except Exception:
-                return None
-
-        ank_l, ank_r = get(15), get(16)
-        if ank_l is not None or ank_r is not None:
-            pts = [p for p in (ank_l, ank_r) if p is not None]
-            foot = np.mean(np.stack(pts), axis=0) if len(pts) == 2 else pts[0]
-            return np.array([foot[0], max(foot[1], y1)], dtype=np.float32)
-
-        knee_l, knee_r = get(13), get(14)
-        if knee_l is not None or knee_r is not None:
-            ky = max([p[1] for p in [knee_l, knee_r] if p is not None])
-            return np.array([cx_bottom, max(ky, y1)], dtype=np.float32)
-
-        return np.array([cx_bottom, y_bottom], dtype=np.float32)
-
-    def _eroded_mask(self, ref_mask, M, W, H):
-        mask_img = cv2.warpPerspective(ref_mask, M, (W, H), flags=cv2.INTER_NEAREST)
-        kernel = np.ones((self.roi_erode_kernel, self.roi_erode_kernel), np.uint8)
-        return cv2.erode(mask_img, kernel, iterations=1)  # 0/1
-
-    @staticmethod
-    def _bbox_mask_overlap_ratio(bbox, mask01):
-        """bbox 與 0/1 mask 的重疊比例（以 bbox 面積為分母）。"""
+    def _foot_point_from_landmarks(
+        landmarks: List[Tuple[float, float, float]],
+        bbox: Tuple[int, int, int, int],
+    ) -> Tuple[int, int]:
         x1, y1, x2, y2 = bbox
-        x1 = max(x1, 0); y1 = max(y1, 0)
-        x2 = min(x2, mask01.shape[1]-1); y2 = min(y2, mask01.shape[0]-1)
+        candidates = []
+        for idx in (31, 32, 29, 30):
+            if idx < len(landmarks):
+                x, y, v = landmarks[idx]
+                if v > 0.2:
+                    candidates.append((x, y))
+        if candidates:
+            xs, ys = zip(*candidates)
+            return int(np.mean(xs)), int(max(ys))
+        return int((x1 + x2) / 2), int(y2)
+
+    @staticmethod
+    def _pose_standing_ratio(landmarks: List[Tuple[float, float, float]], bbox: Tuple[int, int, int, int]) -> float:
+        valid = [y for _, y, v in landmarks if v >= 0.2]
+        if not valid:
+            return 1.0
+        y_min = float(min(valid))
+        y_max = float(max(valid))
+        _, y1, _, y2 = bbox
+        skel_h = max(1.0, y_max - y_min)
+        box_h = max(1.0, float(y2 - y1))
+        return skel_h / box_h
+
+    @staticmethod
+    def _leg_chain_ok(landmarks: List[Tuple[float, float, float]]) -> float:
+        def valid(idx: int) -> Optional[float]:
+            if idx < len(landmarks):
+                _, y, v = landmarks[idx]
+                if v >= 0.2:
+                    return y
+            return None
+
+        score = 0.0
+        for hip, knee, ankle in ((23, 25, 27), (24, 26, 28)):
+            hy = valid(hip)
+            ky = valid(knee)
+            ay = valid(ankle)
+            if hy is not None and ky is not None and ay is not None and hy < ky < ay:
+                score += 0.5
+        return score
+
+    def _composite_score(self, det_score: float, box_h_norm: float, pose_score: float, motion_energy: float) -> float:
+        return (
+            self.det_score_weight * det_score
+            + self.size_weight * box_h_norm
+            + self.pose_weight * pose_score
+            + self.motion_weight * motion_energy
+        )
+
+    @staticmethod
+    def _bbox_mask_overlap_ratio(bbox: Tuple[int, int, int, int], mask: Optional[np.ndarray]) -> float:
+        if mask is None:
+            return 0.0
+        x1, y1, x2, y2 = bbox
+        x1 = max(x1, 0)
+        y1 = max(y1, 0)
+        x2 = min(x2, mask.shape[1] - 1)
+        y2 = min(y2, mask.shape[0] - 1)
         if x2 <= x1 or y2 <= y1:
             return 0.0
-        crop = mask01[y1:y2, x1:x2]
+        crop = mask[y1:y2, x1:x2]
         inter = float(np.count_nonzero(crop))
         area_box = float((x2 - x1) * (y2 - y1))
         return inter / max(area_box, 1.0)
 
     @staticmethod
-    def _pose_standing_ratio(kps, bbox):
-        """骨架高度 / 框高（站立者通常較高；坐姿明顯較小）。"""
-        if kps is None:
-            return 1.0  # 沒骨架就不扣
-        y_min, y_max = PersonDetector._kps_minmax_y(kps)
-        if y_min is None:
-            return 1.0
-        _, y1, _, y2 = PersonDetector._bbox_to_int(bbox)
-        skel_h = max(1.0, float(y_max - y_min))
-        box_h = max(1.0, float(y2 - y1))
-        return skel_h / box_h
-
-    @staticmethod
-    def _leg_chain_ok(kps):
-        """簡易站姿檢查：hip<knee<ankle 的垂直序。"""
-        if kps is None:
-            return 0.0
-        def ok(h, k, a):
-            try:
-                hy, ky, ay = kps[h][1], kps[k][1], kps[a][1]
-                if not (np.isfinite(hy) and np.isfinite(ky) and np.isfinite(ay)):
-                    return False
-                return hy < ky < ay
-            except Exception:
-                return False
-        score = 0.0
-        if ok(11, 13, 15): score += 0.5
-        if ok(12, 14, 16): score += 0.5
-        return score  # 0~1
-
-    def _composite_score(self, det_score, box_h_norm, pose_score, motion_energy):
-        return (self.det_score_weight * det_score
-                + self.size_weight * box_h_norm
-                + self.pose_weight * pose_score
-                + self.motion_weight * motion_energy)
-
-    def _pick_with_tracking(self, cands, center_pt, prev_pt, gate_px):
-        if not cands:
+    def _pick_with_tracking(
+        candidates: List[dict],
+        center_pt: Optional[np.ndarray],
+        prev_pt: Optional[np.ndarray],
+        gate_px: float,
+    ) -> List[dict]:
+        if not candidates:
             return []
-        # 先依綜合分數排
-        cands = sorted(cands, key=lambda c: c["score"], reverse=True)
-        # 有前一幀：優先 gate 內最近者
+        sorted_cands = sorted(candidates, key=lambda c: c["score"], reverse=True)
         if prev_pt is not None:
-            inside = [(np.hypot(c["pt"][0]-prev_pt[0], c["pt"][1]-prev_pt[1]), c) for c in cands]
-            inside = [t for t in inside if t[0] <= gate_px]
+            inside = [
+                (np.hypot(c["pt"][0] - prev_pt[0], c["pt"][1] - prev_pt[1]), c)
+                for c in sorted_cands
+            ]
+            inside = [entry for entry in inside if entry[0] <= gate_px]
             if inside:
-                return [(min(inside, key=lambda t: t[0])[1]["bbox"],
-                         min(inside, key=lambda t: t[0])[1]["pt"],
-                         min(inside, key=lambda t: t[0])[1]["kps"])]
-        # 否則從前 K 名挑離半場中心最近
-        K = min(3, len(cands))
-        topk = cands[:K]
-        chosen = min(topk, key=lambda c: np.hypot(c["pt"][0]-center_pt[0], c["pt"][1]-center_pt[1]))
-        return [(chosen["bbox"], chosen["pt"], chosen["kps"])]
+                return [min(inside, key=lambda entry: entry[0])[1]]
+        if center_pt is None:
+            center_pt = np.array([0.0, 0.0], dtype=np.float32)
+        topk = sorted_cands[: min(3, len(sorted_cands))]
+        chosen = min(
+            topk,
+            key=lambda c: np.hypot(c["pt"][0] - center_pt[0], c["pt"][1] - center_pt[1]),
+        )
+        return [chosen]
 
-    # ---------- 主流程 ---------- #
-    def detect_top_and_bottom_players(self, image, inv_matrix, filter_players=False):
-        H, W = image.shape[:2]
-        M = cv2.invert(inv_matrix)[1]
+    def _update_motion(
+        self,
+        prev_pt: Optional[np.ndarray],
+        energy: float,
+        chosen_pt: Optional[np.ndarray],
+        frame_height: int,
+    ) -> float:
+        if prev_pt is not None and chosen_pt is not None:
+            delta = np.hypot(chosen_pt[0] - prev_pt[0], chosen_pt[1] - prev_pt[1]) / max(1.0, float(frame_height))
+            energy = self.motion_decay * energy + self.motion_gain * delta
+        else:
+            energy = self.motion_decay * energy
+        return energy
 
-        # 半場 ROI（收縮）
-        mask_top = self._eroded_mask(self.ref_top_court, M, W, H)
-        mask_bot = self._eroded_mask(self.ref_bottom_court, M, W, H)
+    def _compute_masks(
+        self,
+        inv_matrix: Optional[np.ndarray],
+        width: int,
+        height: int,
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+        if inv_matrix is None:
+            return None, None, None
+        ok, matrix = cv2.invert(inv_matrix)
+        if not ok:
+            return None, None, None
+        kernel = np.ones((self.roi_erode_kernel, self.roi_erode_kernel), dtype=np.uint8)
+        mask_top = cv2.warpPerspective(self.ref_top_mask, matrix, (width, height), flags=cv2.INTER_NEAREST)
+        mask_top = cv2.erode(mask_top, kernel, iterations=1)
+        mask_bottom = cv2.warpPerspective(self.ref_bottom_mask, matrix, (width, height), flags=cv2.INTER_NEAREST)
+        mask_bottom = cv2.erode(mask_bottom, kernel, iterations=1)
+        return mask_top, mask_bottom, matrix
 
-        # 半場幾何中心
+    def _court_centers(
+        self,
+        persp_matrix: Optional[np.ndarray],
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        if persp_matrix is None:
+            return None, None
         refer_kps = np.array(self.court_ref.key_points[12:], dtype=np.float32).reshape((-1, 1, 2))
-        trans_kps = cv2.perspectiveTransform(refer_kps, M)
+        trans_kps = cv2.perspectiveTransform(refer_kps, persp_matrix)
         center_top = trans_kps[0][0]
         center_bottom = trans_kps[1][0]
+        return center_top, center_bottom
 
-        # YOLO 偵測
-        bboxes, probs, keypoints = self.detect(image, self.default_conf, self.default_imgsz)
+    @staticmethod
+    def _record_to_detection(record: dict) -> PlayerDetection:
+        bbox = tuple(int(v) for v in record["bbox"])
+        foot = (int(record["pt"][0]), int(record["pt"][1]))
+        return PlayerDetection(
+            bbox=bbox,
+            foot=foot,
+            landmarks=record["landmarks"],
+            world_landmarks=record.get("world_landmarks"),
+            confidence=record.get("det", 0.0),
+            score=record.get("score", 0.0),
+            side=record.get("side", "top"),
+        )
 
-        # 當幀候選
-        cand_top, cand_bottom = [], []
+    # ------------------------------ main logic ----------------------------- #
 
-        for bbox, score, kps in zip(bboxes, probs, keypoints):
-            x1, y1, x2, y2 = [self._safe_clip(v, 0, W-1 if i%2==0 else H-1)
-                              if i%2==0 else self._safe_clip(v, 0, H-1)
-                              for i, v in enumerate(bbox)]
+    def _process_frame(
+        self,
+        frame: np.ndarray,
+        frame_idx: int,
+        inv_matrix: Optional[np.ndarray],
+    ) -> Tuple[List[PlayerDetection], List[PlayerDetection]]:
+        frame_proc = self._prepare_sizes(frame)
+        height, width = frame.shape[:2]
+
+        results = self.detection_model.predict(
+            frame_proc,
+            conf=self.default_conf,
+            imgsz=self.default_imgsz,
+            device=self.device,
+            classes=[0],
+            agnostic_nms=True,
+            verbose=False,
+        )[0]
+
+        boxes = results.boxes.xyxy.cpu().numpy() if results.boxes is not None else []
+        scores = results.boxes.conf.cpu().numpy() if results.boxes is not None else []
+        mask_top, mask_bottom, matrix = self._compute_masks(inv_matrix, width, height)
+        center_top, center_bottom = self._court_centers(matrix)
+        if center_top is None:
+            center_top = np.array([width / 2.0, height * 0.25], dtype=np.float32)
+        if center_bottom is None:
+            center_bottom = np.array([width / 2.0, height * 0.75], dtype=np.float32)
+
+        candidates_top: List[dict] = []
+        candidates_bottom: List[dict] = []
+
+        for box, score in zip(boxes, scores):
+            crop, (x1c, y1c, x2c, y2c) = crop_with_margin(frame_proc, box, margin=0.15)
+            if crop.size == 0:
+                continue
+            crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            mp_results = self.pose.process(crop_rgb)
+            if not (mp_results.pose_landmarks and mp_results.pose_world_landmarks):
+                continue
+
+            bbox_scaled = np.array(
+                [
+                    round(box[0] * self.scale_x),
+                    round(box[1] * self.scale_y),
+                    round(box[2] * self.scale_x),
+                    round(box[3] * self.scale_y),
+                ],
+                dtype=np.float32,
+            )
+            x1 = self._safe_clip(bbox_scaled[0], 0, width - 1)
+            y1 = self._safe_clip(bbox_scaled[1], 0, height - 1)
+            x2 = self._safe_clip(bbox_scaled[2], 0, width - 1)
+            y2 = self._safe_clip(bbox_scaled[3], 0, height - 1)
             if x2 <= x1 or y2 <= y1:
                 continue
-
             box_h = y2 - y1
-            if box_h < self._min_h_by_y(y2, H):
+            if box_h < self._min_h_by_y(y2, height):
                 continue
 
-            # 腳底點
-            foot = self._foot_point_from_kps(kps, np.array([x1, y1, x2, y2], dtype=np.float32))
-            fx, fy = int(np.clip(foot[0], 0, W-1)), int(np.clip(foot[1], 0, H-1))
+            landmarks: List[Tuple[float, float, float]] = []
+            for lm in mp_results.pose_landmarks.landmark:
+                x = x1c + lm.x * (x2c - x1c)
+                y = y1c + lm.y * (y2c - y1c)
+                v = getattr(lm, "visibility", 1.0)
+                landmarks.append((x * self.scale_x, y * self.scale_y, v))
 
-            # 重疊比例（關鍵！）
-            overlap_top = self._bbox_mask_overlap_ratio((x1, y1, x2, y2), mask_top)
-            overlap_bot = self._bbox_mask_overlap_ratio((x1, y1, x2, y2), mask_bot)
+            # Dual-box refinement: blend YOLO box with skeleton box
+            visible_pts = [(pt[0], pt[1]) for pt in landmarks if pt[2] >= 0.2]
+            if visible_pts:
+                xs, ys = zip(*visible_pts)
+                skel_x1 = self._safe_clip(min(xs) - 5, 0, width - 1)
+                skel_y1 = self._safe_clip(min(ys) - 5, 0, height - 1)
+                skel_x2 = self._safe_clip(max(xs) + 5, 0, width - 1)
+                skel_y2 = self._safe_clip(max(ys) + 5, 0, height - 1)
+                blend = 0.4
+                x1 = int((1 - blend) * x1 + blend * skel_x1)
+                y1 = int((1 - blend) * y1 + blend * skel_y1)
+                x2 = int((1 - blend) * x2 + blend * skel_x2)
+                y2 = int((1 - blend) * y2 + blend * skel_y2)
+                x1 = self._safe_clip(x1, 0, x2 - 1)
+                y1 = self._safe_clip(y1, 0, y2 - 1)
+
+            bbox_int = (x1, y1, x2, y2)
+            foot_x, foot_y = self._foot_point_from_landmarks(landmarks, bbox_int)
+            foot_x = self._safe_clip(foot_x, 0, width - 1)
+            foot_y = self._safe_clip(foot_y, 0, height - 1)
+
+            pose_ratio = self._pose_standing_ratio(landmarks, bbox_int)
+            leg_score = self._leg_chain_ok(landmarks)
+            if pose_ratio >= self.min_standing_ratio:
+                pose_score = min(1.0, 0.5 * pose_ratio + 0.5 * leg_score)
+            else:
+                pose_score = 0.25 * pose_ratio + 0.25 * leg_score
+
+            box_h_norm = np.clip(box_h / float(height), 0.0, 1.0)
+            overlap_top = self._bbox_mask_overlap_ratio(bbox_int, mask_top)
+            overlap_bottom = self._bbox_mask_overlap_ratio(bbox_int, mask_bottom)
             in_top = overlap_top >= self.overlap_thresh
-            in_bot = overlap_bot >= self.overlap_thresh
-            if not (in_top or in_bot):
-                continue
+            in_bottom = overlap_bottom >= self.overlap_thresh
 
-            # 站姿得分
-            stand_ratio = self._pose_standing_ratio(kps, np.array([x1, y1, x2, y2]))
-            leg_seq = self._leg_chain_ok(kps)
-            pose_score = 0.0
-            # 站著且腿部序關係成立 → 加分；反之（坐姿）降權
-            if stand_ratio >= self.min_standing_ratio:
-                pose_score = min(1.0, 0.5 * stand_ratio + 0.5 * leg_seq)
-            else:
-                pose_score = 0.25 * stand_ratio + 0.25 * leg_seq  # 坐姿弱分
+            if mask_top is None and mask_bottom is None:
+                if foot_y < height / 2:
+                    in_top = True
+                else:
+                    in_bottom = True
 
-            # 綜合分數
-            box_h_norm = np.clip(box_h / float(H), 0.0, 1.0)
+            if not (in_top or in_bottom):
+                # fall back to baseline proximity to dividing line
+                top_base = 1.0 - np.clip(foot_y / height, 0.0, 1.0)
+                bottom_base = np.clip(foot_y / height, 0.0, 1.0)
+                if top_base >= bottom_base:
+                    in_top = True
+                else:
+                    in_bottom = True
 
-            rec = dict(
-                bbox=np.array([x1, y1, x2, y2], dtype=np.int32),
-                pt=np.array([fx, fy], dtype=np.float32),
-                kps=kps,
-                det=score,
-                size=box_h_norm,
-                pose=pose_score,   # 0~1
-                # motion 暫時先 0，待選擇時再帶入對應半場的 motion_energy
-                motion=0.0,
-                score=0.0
+            record = {
+                "bbox": np.array([x1, y1, x2, y2], dtype=np.int32),
+                "pt": np.array([float(foot_x), float(foot_y)], dtype=np.float32),
+                "landmarks": landmarks,
+                "world_landmarks": np.array(
+                    [[lm.x, lm.y, lm.z] for lm in mp_results.pose_world_landmarks.landmark]
+                ),
+                "det": float(score),
+                "size": box_h_norm,
+                "pose": pose_score,
+                "motion": 0.0,
+                "score": 0.0,
+            }
+
+            if in_top:
+                rec_top = record.copy()
+                rec_top["side"] = "top"
+                candidates_top.append(rec_top)
+            if in_bottom:
+                rec_bottom = record.copy()
+                rec_bottom["side"] = "bottom"
+                candidates_bottom.append(rec_bottom)
+
+        gate_px = self.gate_ratio * height
+        if not candidates_top and self.last_record_top is not None and self.counter_top < self.max_missing_frames:
+            fallback_top = self.last_record_top.copy()
+            fallback_top["det"] *= self.fallback_decay
+            fallback_top["score"] = self._composite_score(
+                fallback_top["det"], fallback_top["size"], fallback_top["pose"], self.motion_energy_top
             )
+            candidates_top.append(fallback_top)
 
-            if in_top:   cand_top.append(rec)
-            if in_bot:   cand_bottom.append(rec)
+        if not candidates_bottom and self.last_record_bottom is not None and self.counter_bottom < self.max_missing_frames:
+            fallback_bottom = self.last_record_bottom.copy()
+            fallback_bottom["det"] *= self.fallback_decay
+            fallback_bottom["score"] = self._composite_score(
+                fallback_bottom["det"], fallback_bottom["size"], fallback_bottom["pose"], self.motion_energy_bottom
+            )
+            candidates_bottom.append(fallback_bottom)
 
-        # —— 活動度：用上一幀移動距離更新 —— #
-        gate_px = self.gate_ratio * H
+        for cand in candidates_top:
+            cand["motion"] = self.motion_energy_top
+            cand["score"] = self._composite_score(cand["det"], cand["size"], cand["pose"], cand["motion"])
+        for cand in candidates_bottom:
+            cand["motion"] = self.motion_energy_bottom
+            cand["score"] = self._composite_score(cand["det"], cand["size"], cand["pose"], cand["motion"])
 
-        def update_motion(prev_pt, energy, chosen_pt):
-            """chosen_pt 可能為 None（當幀無選）。"""
-            if prev_pt is not None and chosen_pt is not None:
-                delta = np.hypot(chosen_pt[0] - prev_pt[0], chosen_pt[1] - prev_pt[1]) / max(1.0, float(H))
-                energy = self.motion_decay * energy + self.motion_gain * delta
-            else:
-                # 沒有新點時也做衰減，讓長期不動者能掉分
-                energy = self.motion_decay * energy
-            return energy
+        sel_top = self._pick_with_tracking(candidates_top, center_top, self.point_person_top, gate_px)
+        sel_bottom = self._pick_with_tracking(candidates_bottom, center_bottom, self.point_person_bottom, gate_px)
 
-        # 在挑人前，先把各半場候選的 motion 權重帶入（用目前累積的 energy）
-        for c in cand_top:
-            c["motion"] = self.motion_energy_top
-            c["score"] = self._composite_score(c["det"], c["size"], c["pose"], c["motion"])
-        for c in cand_bottom:
-            c["motion"] = self.motion_energy_bottom
-            c["score"] = self._composite_score(c["det"], c["size"], c["pose"], c["motion"])
-
-        # 依追蹤 gate / 半場中心挑人
-        sel_top = self._pick_with_tracking(cand_top, center_top, self.point_person_top, gate_px)
-        sel_bottom = self._pick_with_tracking(cand_bottom, center_bottom, self.point_person_bottom, gate_px)
-
-        # 指數平滑追蹤點 + 遺失計數
-        def smooth(prev, new):
+        def smooth(prev: Optional[np.ndarray], new: np.ndarray) -> np.ndarray:
             if prev is None:
                 return new.astype(np.float32)
             a = 0.6
-            return np.array([a*prev[0] + (1-a)*new[0], a*prev[1] + (1-a)*new[1]], dtype=np.float32)
+            return np.array([a * prev[0] + (1 - a) * new[0], a * prev[1] + (1 - a) * new[1]], dtype=np.float32)
 
-        # 更新 top
         if sel_top:
-            self.point_person_top = smooth(self.point_person_top, sel_top[0][1])
+            self.point_person_top = smooth(self.point_person_top, sel_top[0]["pt"])
             self.counter_top = 0
         else:
             self.counter_top += 1
@@ -333,9 +473,8 @@ class PersonDetector():
                 self.point_person_top = None
                 self.counter_top = 0
 
-        # 更新 bottom
         if sel_bottom:
-            self.point_person_bottom = smooth(self.point_person_bottom, sel_bottom[0][1])
+            self.point_person_bottom = smooth(self.point_person_bottom, sel_bottom[0]["pt"])
             self.counter_bottom = 0
         else:
             self.counter_bottom += 1
@@ -343,51 +482,55 @@ class PersonDetector():
                 self.point_person_bottom = None
                 self.counter_bottom = 0
 
-        # —— 用最新移動量更新活動度（核心！）—— #
-        self.motion_energy_top = update_motion(self.point_person_top, self.motion_energy_top,
-                                               sel_top[0][1] if sel_top else None)
-        self.motion_energy_bottom = update_motion(self.point_person_bottom, self.motion_energy_bottom,
-                                                  sel_bottom[0][1] if sel_bottom else None)
+        self.motion_energy_top = self._update_motion(
+            self.point_person_top,
+            self.motion_energy_top,
+            sel_top[0]["pt"] if sel_top else None,
+            height,
+        )
+        self.motion_energy_bottom = self._update_motion(
+            self.point_person_bottom,
+            self.motion_energy_bottom,
+            sel_bottom[0]["pt"] if sel_bottom else None,
+            height,
+        )
 
-        # 需要的話保留原「距中心最近者」的最終濾波
-        if filter_players:
-            sel_top, sel_bottom = self.filter_players(sel_top, sel_bottom, M)
+        if sel_top:
+            self.last_record_top = sel_top[0].copy()
+        elif self.counter_top >= self.max_missing_frames:
+            self.last_record_top = None
 
-        return sel_top, sel_bottom
+        if sel_bottom:
+            self.last_record_bottom = sel_bottom[0].copy()
+        elif self.counter_bottom >= self.max_missing_frames:
+            self.last_record_bottom = None
 
-    def filter_players(self, person_bboxes_top, person_bboxes_bottom, matrix):
-        refer_kps = np.array(self.court_ref.key_points[12:], dtype=np.float32).reshape((-1, 1, 2))
-        trans_kps = cv2.perspectiveTransform(refer_kps, matrix)
-        center_top_court = trans_kps[0][0]
-        center_bottom_court = trans_kps[1][0]
+        players_top = [self._record_to_detection(rec) for rec in sel_top]
+        players_bottom = [self._record_to_detection(rec) for rec in sel_bottom]
 
-        def keep_closest(cands, center):
-            if len(cands) <= 1:
-                return cands
-            dists = [distance.euclidean(x[1], center) for x in cands]
-            return [cands[int(np.argmin(dists))]]
+        return players_top, players_bottom
 
-        person_bboxes_top = keep_closest(person_bboxes_top, center_top_court)
-        person_bboxes_bottom = keep_closest(person_bboxes_bottom, center_bottom_court)
-        return person_bboxes_top, person_bboxes_bottom
+    # ------------------------------- public API --------------------------- #
 
-    def track_players(self, frames, matrix_all, filter_players=False):
-        persons_top, persons_bottom = [], []
-        min_len = min(len(frames), len(matrix_all))
-        for i in tqdm(range(min_len)):
-            img = frames[i]
-            if matrix_all[i] is not None:
-                invM = matrix_all[i]
-                pt, pb = self.detect_top_and_bottom_players(img, invM, filter_players)
-            else:
-                pt, pb = [], []
-                self.counter_top += 1; self.counter_bottom += 1
-                if self.counter_top > self.max_missing_frames:
-                    self.point_person_top = None; self.counter_top = 0
-                if self.counter_bottom > self.max_missing_frames:
-                    self.point_person_bottom = None; self.counter_bottom = 0
-                # 活動度自然衰減
-                self.motion_energy_top *= self.motion_decay
-                self.motion_energy_bottom *= self.motion_decay
-            persons_top.append(pt); persons_bottom.append(pb)
+    def track_players(
+        self,
+        frames: List[np.ndarray],
+        homography_matrices: List[Optional[np.ndarray]],
+    ) -> Tuple[List[List[PlayerDetection]], List[List[PlayerDetection]]]:
+        persons_top: List[List[PlayerDetection]] = []
+        persons_bottom: List[List[PlayerDetection]] = []
+
+        for idx, frame in enumerate(tqdm(frames, desc='Detect players', unit='frame')):
+            inv_matrix = homography_matrices[idx] if idx < len(homography_matrices) else None
+            top, bottom = self._process_frame(frame, idx, inv_matrix)
+            persons_top.append(top)
+            persons_bottom.append(bottom)
+
         return persons_top, persons_bottom
+
+    def close(self) -> None:
+        if hasattr(self.pose, "close"):
+            self.pose.close()
+
+
+__all__ = ["PersonDetector", "PlayerDetection"]

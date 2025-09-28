@@ -7,15 +7,14 @@ BOUNCE_DIR="./model/bounce"
 PERSON_DIR="./model/person"
 INPUT_DIR="./input"
 OUTPUT_DIR="./output"
+PERSON_MODEL="./yolov8n.pt"
 
-mkdir -p "$BALL_DIR" "$COURT_DIR" "$BOUNCE_DIR" "$INPUT_DIR" "$OUTPUT_DIR"
+mkdir -p "$BALL_DIR" "$COURT_DIR" "$BOUNCE_DIR" "$PERSON_DIR" "$INPUT_DIR" "$OUTPUT_DIR"
 
 # ====== 模型清單 ======
 BALL_MODEL="yolov8_ball_09250900_best.pt"
 COURT_MODEL="court.pt"
 BOUNCE_MODEL="ctb_regr_bounce.cbm"
-PERSON_MODEL="yolov8n-pose.pt"
-
 BALL_URL="https://drive.google.com/uc?export=download&id=10DHUZL3RQuNMA4gAxfPzOhqVL-JLCJLf"
 COURT_URL="https://drive.google.com/uc?export=download&id=1f-Co64ehgq4uddcQm1aFBDtbnyZhQvgG"
 BOUNCE_URL="https://drive.google.com/uc?export=download&id=1Eo5HDnAQE8y_FbOftKZ8pjiojwuy2BmJ"
@@ -39,10 +38,10 @@ fi
 # ====== 影片清單(前面是要存到電腦的名字，不用跟原檔名一樣，但要跟原有的不一樣，不然重複就不會再下載了) ======
 declare -A VIDEO_URLS=(
   ["最好辨識的.mp4"]="https://drive.google.com/uc?export=download&id=1ttWh0nV9lqFnOBOOA92f3X_uMuRACLZ5"
-  ["抓不到落點的.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
-  ["巨人評審.mp4"]="https://drive.google.com/uc?export=download&id=1ESsqFBvpI3X3HQJRggmtCjTnYrkwKlEI"
-  ["哪來那麼多球僮.mp4"]="https://drive.google.com/uc?export=download&id=1MmoShAfNSuhsFhm6JohbaWi2Dr9WJk2I"
-  ["會動的場地.mp4"]="https://drive.google.com/uc?export=download&id=1tqz4EVIVq08MocZzFuj3UHxfuai-b9ZG"
+  # ["抓不到落點的.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
+  # ["巨人評審.mp4"]="https://drive.google.com/uc?export=download&id=1ESsqFBvpI3X3HQJRggmtCjTnYrkwKlEI"
+  # ["哪來那麼多球僮.mp4"]="https://drive.google.com/uc?export=download&id=1MmoShAfNSuhsFhm6JohbaWi2Dr9WJk2I"
+  # ["會動的場地.mp4"]="https://drive.google.com/uc?export=download&id=1tqz4EVIVq08MocZzFuj3UHxfuai-b9ZG"
 )
 
 # ====== 檢查 & 下載影片 ======
@@ -57,11 +56,12 @@ done
 for video in "${!VIDEO_URLS[@]}"; do
   base=$(basename "$video" .mp4)
   echo "開始處理 $base ..."
+  # 可直接改 avi 或 mp4
   python main.py \
     --path_ball_track_model "$BALL_DIR/$BALL_MODEL" \
     --path_court_model "$COURT_DIR/$COURT_MODEL" \
     --path_bounce_model "$BOUNCE_DIR/$BOUNCE_MODEL" \
     --path_person_model "$PERSON_DIR/$PERSON_MODEL" \
     --path_input_video "$INPUT_DIR/$video" \
-    --path_output_video "$OUTPUT_DIR/${base}_out.mp4" #可直接改avi或mp4
+    --path_output_video "$OUTPUT_DIR/${base}_out.mp4"
 done
