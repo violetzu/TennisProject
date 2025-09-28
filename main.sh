@@ -38,10 +38,10 @@ fi
 # ====== 影片清單(前面是要存到電腦的名字，不用跟原檔名一樣，但要跟原有的不一樣，不然重複就不會再下載了) ======
 declare -A VIDEO_URLS=(
   ["最好辨識的.mp4"]="https://drive.google.com/uc?export=download&id=1ttWh0nV9lqFnOBOOA92f3X_uMuRACLZ5"
-  # ["抓不到落點的.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
-  # ["巨人評審.mp4"]="https://drive.google.com/uc?export=download&id=1ESsqFBvpI3X3HQJRggmtCjTnYrkwKlEI"
-  # ["哪來那麼多球僮.mp4"]="https://drive.google.com/uc?export=download&id=1MmoShAfNSuhsFhm6JohbaWi2Dr9WJk2I"
-  # ["會動的場地.mp4"]="https://drive.google.com/uc?export=download&id=1tqz4EVIVq08MocZzFuj3UHxfuai-b9ZG"
+  ["抓不到落點的.mp4"]="https://drive.google.com/uc?export=download&id=1Hb6mlEmQhOkPuhPKYrrwRuCMEwYkNLJi"
+  ["巨人評審.mp4"]="https://drive.google.com/uc?export=download&id=1ESsqFBvpI3X3HQJRggmtCjTnYrkwKlEI"
+  ["哪來那麼多球僮.mp4"]="https://drive.google.com/uc?export=download&id=1MmoShAfNSuhsFhm6JohbaWi2Dr9WJk2I"
+  ["會動的場地.mp4"]="https://drive.google.com/uc?export=download&id=1tqz4EVIVq08MocZzFuj3UHxfuai-b9ZG"
 )
 
 # ====== 檢查 & 下載影片 ======
