@@ -224,23 +224,25 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--path_ball_track_model', type=str, required=True,
-                        help='path to pretrained model for ball detection')
+                        help='球體偵測模型路徑')
     parser.add_argument('--path_court_model', type=str, required=True,
-                        help='path to pretrained model for court detection')
+                        help='球場線框偵測模型路徑')
     parser.add_argument('--path_bounce_model', type=str, required=True,
-                        help='path to pretrained model for bounce detection')
+                        help='落點預測模型路徑')
     parser.add_argument('--path_person_model', type=str, required=True,
-                        help='YOLO model path for player detection')
-    parser.add_argument('--path_input_video', type=str, required=True, help='path to input video')
-    parser.add_argument('--path_output_video', type=str, required=True, help='path to output video')
+                        help='YOLO 選手偵測模型路徑')
+    parser.add_argument('--path_input_video', type=str, required=True,
+                        help='輸入影片路徑')
+    parser.add_argument('--path_output_video', type=str, required=True,
+                        help='輸出影片路徑')
     parser.add_argument('--person_confidence', type=float, default=0.5,
-                        help='confidence threshold for player detection')
+                        help='選手偵測信心門檻 (0~1)')
     parser.add_argument('--person_resize_width', type=int, default=None,
-                        help='optional resize width before detection')
+                        help='選手偵測前的縮放寬度 (預設不縮放)')
     parser.add_argument('--pose_no_smoothing', action='store_true',
-                        help='disable temporal smoothing for the 3D pose view')
+                        help='停用 3D 骨架平滑')
     parser.add_argument('--pose_smoothing_window', type=int, default=5,
-                        help='number of frames used for 3D pose smoothing')
+                        help='3D 骨架平滑的滑動視窗大小')
     args = parser.parse_args()
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
