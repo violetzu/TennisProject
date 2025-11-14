@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>球在哪</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", Arial; margin: 24px; }
+    .card { max-width: 920px; border: 1px solid #ddd; border-radius: 16px; padding: 16px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    label { font-weight: 600; }
+    input[type="text"] { width: 360px; padding: 6px 8px; }
+    button { padding: 8px 14px; border: 0; border-radius: 10px; background: #111827; color: #fff; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .meta { color: #6b7280; font-size: 14px; }
+    img { max-width: 100%; border-radius: 12px; border: 1px solid #eee; }
+    .answer { font-size: 18px; font-weight: 700; margin: 10px 0 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>球在哪</h2>
+    <p class="meta">先上傳影片 → 文字提問 → llm回一句話 + 標註圖。</p>
+
+    <div class="row" style="margin-top:12px;">
+      <input id="file" type="file" accept="video/*" />
+      <button id="btnUpload">上傳影片</button>
+      <span id="uploadInfo" class="meta"></span>
+    </div>
+
+    <div class="row" style="margin-top:16px;">
+      <label for="query">問題：</label>
+      <input id="query" type="text" placeholder="例：第17幀球在哪／120幀有沒有球" />
+      <label for="model">模型：</label>
+      <select id="model">
+        <option value="qwen2.5">qwen2.5</option>
+        <option value="llama3.1">llama3.1</option>
+      </select>
+      <button id="btnAsk" disabled>送出問題</button>
+    </div>
+
+    <div id="result" style="margin-top:20px; display:none;">
+      <div class="answer" id="answer"></div>
+      <div class="meta" id="meta"></div>
+      <div id="imgWrap" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let videoId = null, totalFrames = 0, fps = 0;
+
+    $("btnUpload").onclick = async () => {
+      const f = $("file").files[0];
+      if (!f) { alert("請選擇影片檔"); return; }
+      $("btnUpload").disabled = true;
+      $("uploadInfo").textContent = "上傳中…";
+      try {
+        const fd = new FormData();
+        fd.append("file", f);
+        const res = await fetch("/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "上傳失敗");
+        videoId = data.video_id;
+        totalFrames = data.frames || 0;
+        fps = data.fps || 0;
+        $("uploadInfo").textContent = `已上傳：${videoId}（幀數：約 ${totalFrames}、FPS：${fps.toFixed(2)}）`;
+        $("btnAsk").disabled = false;
+      } catch (e) {
+        alert(e.message);
+        $("uploadInfo").textContent = "";
+      } finally {
+        $("btnUpload").disabled = false;
+      }
+    };
+
+    $("btnAsk").onclick = async () => {
+      if (!videoId) { alert("請先上傳影片"); return; }
+      const q = $("query").value.trim();
+      if (!q) { alert("請輸入問題"); return; }
+      const model = $("model").value;
+      $("btnAsk").disabled = true;
+      $("result").style.display = "none";
+      try {
+        const res = await fetch("/ask", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({ query: q, model_name: model })
+        });
+
+        const raw = await res.text();
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch (e) {
+          console.error("Server returned non-JSON:", raw);
+          alert("後端回傳的不是 JSON，原始內容如下：\n" + raw);
+          return;
+        }
+
+        if (!data.ok) {
+          alert("後端錯誤：" + (data.error || "未知錯誤"));
+          return;
+        }
+
+        if (!data.ok) throw new Error(data.error || "查詢失敗");
+        $("answer").textContent = data.answer;
+        $("meta").textContent = data.found
+          ? `grid=${data.grid9}  center=${JSON.stringify(data.center)}  bbox=${JSON.stringify(data.bbox)}`
+          : `未偵測到球`;
+        const wrap = $("imgWrap");
+        wrap.innerHTML = "";
+        if (data.image_url) {
+          const img = new Image();
+          img.src = data.image_url + "?t=" + Date.now();
+          wrap.appendChild(img);
+        }
+        $("result").style.display = "block";
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        $("btnAsk").disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

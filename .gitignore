@@ -1,8 +1,11 @@
 __pycache__/
 *.mp4
+*.png
 *.pt
 *.cbm
 *.Identifier
 for me.md
+llm_server/
 common/
+tests/
 VideoPose3D/

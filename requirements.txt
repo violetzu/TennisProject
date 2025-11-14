@@ -1,12 +1,18 @@
-matplotlib
-scenedetect
-numpy
-scipy
-torch
-torchvision
-pandas
-sympy
+# 如果不用docker image
+# torch
+# torchvision
+
+# main.py 原本有用到的
 tqdm
-opencv_python
 catboost
+mediapipe
+scenedetect
+
+# llm及調用需要
+fastapi
+uvicorn[standard]
+python-multipart
+opencv-python
+pillow
 ultralytics
+ollama
