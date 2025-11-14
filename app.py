@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import cv2
 from ollama import Client, ChatResponse
 
-from src_llm.tools_ball import ball_position_on_frame  # YOLO + 球偵測工具
+from src_llm.tools_ball import ball_position_on_frame  # WJㄉ球偵測
+from src_llm.tools_score import score_video            # PHㄉ逐分記分
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(APP_DIR, "llm_server/uploads")
@@ -20,6 +21,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # 改成你現在要連的那台 Ollama
+#現在是WJ電腦
 OLLAMA_CLIENT = Client(host="http://220.132.170.233:11434")
 
 app = FastAPI()
@@ -48,6 +50,36 @@ def tool_get_ball_position(frame_id: int) -> Dict[str, Any]:
     video_path = os.path.join(UPLOAD_DIR, CURRENT_VIDEO_ID)
     return ball_position_on_frame(video_path, frame_id, OUT_DIR, base_url="/image")
 
+def tool_score_video(debug: bool = False) -> Dict[str, Any]:
+    if CURRENT_VIDEO_ID is None:
+        return {
+            "ok": False,
+            "error": "no video uploaded",
+            "message": "目前沒有上傳中的影片",
+        }
+
+    video_path = os.path.join(UPLOAD_DIR, CURRENT_VIDEO_ID)
+
+    # debug 輸出檔名（存在 OUT_DIR）
+    debug_out = None
+    if debug:
+        base, _ = os.path.splitext(CURRENT_VIDEO_ID)
+        debug_name = f"{base}_score_debug.mp4"
+        debug_out = os.path.join(OUT_DIR, debug_name)
+
+    result = score_video(video_path, debug=debug, debug_out=debug_out)
+
+    # 包一層 ok + 可能的 debug 影片 URL
+    out: Dict[str, Any] = {
+        "ok": True,
+        "fps": result.get("fps", 0.0),
+        "points": result.get("points", []),
+    }
+    if debug and debug_out:
+        # 給前端一個可以抓 debug.mp4 的 URL
+        out["debug_url"] = f"/output/{os.path.basename(debug_out)}"
+
+    return out
 
 def tool_get_video_info() -> Dict[str, Any]:
     if CURRENT_VIDEO_ID is None:
@@ -89,7 +121,25 @@ OLLAMA_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "score_video",
+            "description": "分析目前這部影片的每一分（發球方、關鍵接觸、得分方與原因等）。影片路徑由後端管理，不需要傳。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "debug": {
+                        "type": "boolean",
+                        "description": "是否輸出帶疊字標註的 debug 影片（mp4）",
+                        "default": False,
+                    }
+                },
+            },
+        },
+    },
 ]
+
 
 # ====== 路由 ======
 @app.get("/")
@@ -186,13 +236,17 @@ async def ask(payload: Dict[str, Any]):
             answer_text = resp.message.content
             result: Dict[str, Any] = {"ok": True, "answer": answer_text}
 
-            # 把最後一次工具結果帶回前端（如果有）
             if "get_ball_position" in tool_results:
                 result.update(tool_results["get_ball_position"])
             if "get_video_info" in tool_results:
                 result["video_info"] = tool_results["get_video_info"]
+            if "score_video" in tool_results:
+                # 不直接展開，包在一個欄位裡
+                result["score"] = tool_results["score_video"]
 
             return result
+
+
 
         # 執行所有工具呼叫
         for call in resp.message.tool_calls:
@@ -203,14 +257,14 @@ async def ask(payload: Dict[str, Any]):
                 result = tool_get_ball_position(**args)
             elif name == "get_video_info":
                 result = tool_get_video_info()
+            elif name == "score_video":
+                # args 目前只會有 debug:boolean
+                result = tool_score_video(**args)
             else:
-                # 不認識的 tool 名稱，直接略過（也可以回傳錯誤給 LLM）
                 result = {"ok": False, "error": f"unknown tool: {name}"}
 
-            # 把結果存起來，最後一起塞給前端
             tool_results[name] = result
 
-            # 回餵給 LLM
             messages.append(
                 {
                     "role": "tool",
@@ -218,3 +272,21 @@ async def ask(payload: Dict[str, Any]):
                     "content": json.dumps(result, ensure_ascii=False),
                 }
             )
+
+# PH寫的  
+# 增加一個下載 output 檔案的路由（給 debug.mp4 用）
+@app.get("/output/{name}")
+def get_output(name: str):
+    path = os.path.join(OUT_DIR, name)
+    if not os.path.exists(path):
+        return JSONResponse({"ok": False, "error": "檔案不存在"}, status_code=404)
+
+    ext = os.path.splitext(name)[1].lower()
+    if ext == ".mp4":
+        media_type = "video/mp4"
+    elif ext in [".png", ".jpg", ".jpeg"]:
+        media_type = "image/png"
+    else:
+        media_type = "application/octet-stream"
+
+    return FileResponse(path, media_type=media_type)
