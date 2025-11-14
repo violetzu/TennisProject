@@ -20,7 +20,7 @@
 <body>
   <div class="card">
     <h2>網球比賽分析</h2>
-    <p class="meta">先上傳影片 → 文字提問 → llm回一句話 + 標註圖。</p>
+    <p class="meta">先上傳影片 → 文字提問 → llm回答 ( +標註圖 )。</p>
 
     <div class="row" style="margin-top:12px;">
       <input id="file" type="file" accept="video/*" />
@@ -107,7 +107,7 @@
         $("answer").textContent = data.answer;
         $("meta").textContent = data.found
           ? `grid=${data.grid9}  center=${JSON.stringify(data.center)}  bbox=${JSON.stringify(data.bbox)}`
-          : `未偵測到球`;
+          : ``;
         const wrap = $("imgWrap");
         wrap.innerHTML = "";
         if (data.image_url) {

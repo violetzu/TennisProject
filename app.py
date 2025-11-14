@@ -12,6 +12,7 @@ from ollama import Client, ChatResponse
 
 from src_llm.tools_ball import ball_position_on_frame  # WJㄉ球偵測
 from src_llm.tools_score import score_video            # PHㄉ逐分記分
+from src_llm.tools_clip import explain_clip_segment    # WYㄉ分析
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(APP_DIR, "llm_server/uploads")
@@ -40,6 +41,20 @@ CURRENT_VIDEO_ID: str | None = None
 CURRENT_VIDEO_INFO: Dict[str, Any] = {}
 
 # ====== 將 YOLO 工具包成 LLM 可呼叫的 tool ======
+def tool_get_video_info() -> Dict[str, Any]:
+    if CURRENT_VIDEO_ID is None:
+        return {
+            "ok": False,
+            "error": "no video uploaded",
+            "message": "目前沒有上傳中的影片",
+        }
+    return {
+        "ok": True,
+        "video_id": CURRENT_VIDEO_ID,
+        "frames": CURRENT_VIDEO_INFO.get("frames", 0),
+        "fps": CURRENT_VIDEO_INFO.get("fps", 0.0),
+    }
+
 def tool_get_ball_position(frame_id: int) -> Dict[str, Any]:
     if CURRENT_VIDEO_ID is None:
         return {
@@ -81,21 +96,41 @@ def tool_score_video(debug: bool = False) -> Dict[str, Any]:
 
     return out
 
-def tool_get_video_info() -> Dict[str, Any]:
+def tool_explain_clip_segment(start_ts: str, end_ts: str) -> Dict[str, Any]:
+    """
+    解析目前上傳影片在 [start_ts, end_ts] 這段的網球情境：
+    行為類型、球落地時間、觸球序列與勝方。
+    """
     if CURRENT_VIDEO_ID is None:
         return {
             "ok": False,
             "error": "no video uploaded",
             "message": "目前沒有上傳中的影片",
         }
-    return {
-        "ok": True,
-        "video_id": CURRENT_VIDEO_ID,
-        "frames": CURRENT_VIDEO_INFO.get("frames", 0),
-        "fps": CURRENT_VIDEO_INFO.get("fps", 0.0),
-    }
 
+    video_path = os.path.join(UPLOAD_DIR, CURRENT_VIDEO_ID)
+    # 這邊 out_dir 用現有的 OUT_DIR，就跟 ball_position_on_frame 一樣放同個根目錄
+    return explain_clip_segment(
+        video_path=video_path,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        out_dir=OUT_DIR,
+    )
+
+
+# ====== LLM理解用的 ======
 OLLAMA_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_video_info",
+            "description": "取得影片的總幀數與 fps",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -113,17 +148,6 @@ OLLAMA_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_video_info",
-            "description": "取得影片的總幀數與 fps",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "score_video",
             "description": "分析目前這部影片的每一分（發球方、關鍵接觸、得分方與原因等）。影片路徑由後端管理，不需要傳。",
             "parameters": {
@@ -135,6 +159,27 @@ OLLAMA_TOOLS = [
                         "default": False,
                     }
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_clip_segment",
+            "description": "解析影片在指定時間區間內的網球回合情境，推論行為、落地時間與勝方",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_ts": {
+                        "type": "string",
+                        "description": "片段開始時間，例如 '00:12' 或 '00:12:03'",
+                    },
+                    "end_ts": {
+                        "type": "string",
+                        "description": "片段結束時間，例如 '00:19' 或 '00:19:05'",
+                    },
+                },
+                "required": ["start_ts", "end_ts"],
             },
         },
     },
@@ -213,6 +258,10 @@ async def ask(payload: Dict[str, Any]):
                 "工具說明：\n"
                 "1) get_ball_position(frame_id:int): 回傳該幀球的位置資訊（grid9 / center / bbox / image_url 等）。\n"
                 "2) get_video_info(): 回傳目前影片的總幀數與 fps。\n"
+                "3) score_video(debug:bool=False): 對整部影片做逐分分析，輸出每一分的事件時間點與勝負原因，"
+                "debug=True 時會產生一支帶疊字標註的 debug 影片（後端會回傳網址）。\n"
+                "4) explain_clip_segment(start_ts:str, end_ts:str): 解析指定時間區間的回合狀況，包含動作類型、球落地時間、觸球順序與勝方推定。\n"
+
                 "回答時請用簡短自然的繁體中文，必要時可說明幀數是否超出範圍。"
             ),
         },
@@ -243,6 +292,9 @@ async def ask(payload: Dict[str, Any]):
             if "score_video" in tool_results:
                 # 不直接展開，包在一個欄位裡
                 result["score"] = tool_results["score_video"]
+            if "explain_clip_segment" in tool_results:
+                result["clip_explain"] = tool_results["explain_clip_segment"]
+
 
             return result
 
@@ -260,6 +312,8 @@ async def ask(payload: Dict[str, Any]):
             elif name == "score_video":
                 # args 目前只會有 debug:boolean
                 result = tool_score_video(**args)
+            elif name == "explain_clip_segment":
+                result = tool_explain_clip_segment(**args)
             else:
                 result = {"ok": False, "error": f"unknown tool: {name}"}
 
