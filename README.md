@@ -34,7 +34,7 @@ TennisProject/
 在主目錄下Build Dockerfile
 ```
 cd ~/TennisProject
-docker build -t tennis:latest .
+docker build -f docker/Dockerfile -t tennis:latest .
 ```
 Run Container
 ```
@@ -50,6 +50,7 @@ docker run --gpus all -it --rm \
 啟動
 ``` uvicorn app:app --host 0.0.0.0 --port 8000 --reload ```
 
+ollama部份現在是直接呼叫我本機220.132.170.233的，所以如果是用llama3.1就不用再自己裝
 
 ## 筆記
 markdown preview快捷鍵 ctrl-shift-v

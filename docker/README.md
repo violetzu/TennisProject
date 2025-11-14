@@ -1,18 +1,12 @@
-
-build
-
+在主目錄下Build Dockerfile
 ```
-docker build -t openmmlab-2.1.2-cu121 . 
+cd ~/TennisProject
+docker build -f docker/Dockerfile -t tennis:latest .
 ```
-
-run
-
+Run Container
 ```
-docker run --gpus all -it --name tennisproject \
+docker run --gpus all -it --rm \
   -v ~/TennisProject:/workspace \
-  openmmlab-2.1.2-cu121 bash
+  -p 8000:8000 \
+  tennis:latest /bin/bash
 ```
-
-start
-
-`docker start -ai tennisproject`
