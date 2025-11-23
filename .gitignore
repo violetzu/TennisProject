@@ -8,4 +8,6 @@ for me.md
 llm_server/
 common/
 tests/
-VideoPose3D/
+model/
+*.env
+

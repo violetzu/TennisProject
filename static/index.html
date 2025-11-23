@@ -3,89 +3,328 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>網球比賽分析</title>
+  <title>網球比賽分析助手</title>
   <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", Arial; margin: 24px; }
-    .card { max-width: 920px; border: 1px solid #ddd; border-radius: 16px; padding: 16px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
-    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    label { font-weight: 600; }
-    input[type="text"] { width: 360px; padding: 6px 8px; }
-    button { padding: 8px 14px; border: 0; border-radius: 10px; background: #111827; color: #fff; cursor: pointer; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    .meta { color: #6b7280; font-size: 14px; }
-    img { max-width: 100%; border-radius: 12px; border: 1px solid #eee; }
-    .answer { font-size: 18px; font-weight: 700; margin: 10px 0 0; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", Arial;
+      background: #f3f4f6;
+      display: flex;
+      justify-content: center;
+    }
+    .app {
+      width: 100%;
+      max-width: 960px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-left: 1px solid #e5e7eb;
+      border-right: 1px solid #e5e7eb;
+    }
+    header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #f9fafb;
+    }
+    header h1 {
+      font-size: 18px;
+      margin: 0;
+    }
+    header span {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .top-panel {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      background: #f9fafb;
+    }
+    .upload-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .upload-row button {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: none;
+      background: #111827;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .upload-row button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .upload-row span {
+      font-size: 12px;
+      color: #6b7280;
+    }
+    #videoInfo {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #374151;
+      white-space: pre-wrap;
+    }
+
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      background: #f9fafb;
+    }
+
+    .msg-row {
+      display: flex;
+      margin-bottom: 12px;
+    }
+    .msg-row.user {
+      justify-content: flex-end;
+    }
+    .msg-row.assistant {
+      justify-content: flex-start;
+    }
+    .bubble {
+      max-width: 70%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bubble.user {
+      background: #111827;
+      color: #f9fafb;
+      border-bottom-right-radius: 2px;
+    }
+    .bubble.assistant {
+      background: #e5e7eb;
+      color: #111827;
+      border-bottom-left-radius: 2px;
+    }
+    .meta-text {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+
+    .composer {
+      border-top: 1px solid #e5e7eb;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: #f9fafb;
+    }
+    #query {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      padding: 8px 10px;
+      font-size: 14px;
+      resize: none;
+      min-height: 50px;
+      max-height: 120px;
+    }
+    .composer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .hint {
+      font-size: 12px;
+      color: #6b7280;
+    }
+    button.send-btn {
+      padding: 6px 16px;
+      border-radius: 999px;
+      border: none;
+      background: #111827;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button.send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #status {
+      font-size: 12px;
+      color: #6b7280;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>網球比賽分析</h2>
-    <p class="meta">先上傳影片 → 文字提問 → llm回答 ( +標註圖 )。</p>
+  <div class="app">
+    <header>
+      <div>
+        <h1>網球比賽分析助手</h1>
+        <span>上傳一次影片，之後像 ChatGPT 一樣來回提問</span>
+      </div>
+      <span id="status">請先上傳影片</span>
+    </header>
 
-    <div class="row" style="margin-top:12px;">
-      <input id="file" type="file" accept="video/*" />
-      <button id="btnUpload">上傳影片</button>
-      <span id="uploadInfo" class="meta"></span>
+    <div class="top-panel">
+      <div class="upload-row">
+        <input id="file" type="file" accept="video/*" />
+        <button id="uploadBtn">上傳影片</button>
+        <span id="uploadInfo"></span>
+      </div>
+      <div id="videoInfo"></div>
     </div>
 
-    <div class="row" style="margin-top:16px;">
-      <label for="query">問題：</label>
-      <input id="query" type="text" placeholder="例：第n幀球在哪 / 影片資訊 / 比賽逐分情況 /..." />
-      <label for="model">模型：</label>
-      <select id="model">
-        <option value="llama3.1">llama3.1</option>
-        <option value="qwen2.5">qwen2.5</option>
-      </select>
-      <button id="btnAsk" disabled>送出問題</button>
-    </div>
+    <div id="chat"></div>
 
-    <div id="result" style="margin-top:20px; display:none;">
-      <div class="answer" id="answer"></div>
-      <div class="meta" id="meta"></div>
-      <div id="imgWrap" style="margin-top:12px;"></div>
+    <div class="composer">
+      <textarea id="query" placeholder="輸入你的問題，例如：『這一球誰佔優勢？為什麼？』"></textarea>
+      <div class="composer-bottom">
+        <div class="hint">
+          影片只需上傳一次，之後所有問題都會針對同一支影片回答。
+        </div>
+        <button class="send-btn" id="sendBtn" disabled>送出</button>
+      </div>
     </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    let videoId = null, totalFrames = 0, fps = 0;
 
-    $("btnUpload").onclick = async () => {
-      const f = $("file").files[0];
-      if (!f) { alert("請選擇影片檔"); return; }
-      $("btnUpload").disabled = true;
-      $("uploadInfo").textContent = "上傳中…";
+    const chatEl = $("chat");
+    const fileEl = $("file");
+    const uploadBtn = $("uploadBtn");
+    const uploadInfoEl = $("uploadInfo");
+    const videoInfoEl = $("videoInfo");
+    const queryEl = $("query");
+    const sendBtn = $("sendBtn");
+    const statusEl = $("status");
+
+    let sessionId = null; // 後端用來綁定這支影片 & 對話記憶
+    let videoMeta = null; // 前端顯示用
+
+    function appendMessage(role, text, meta) {
+      const row = document.createElement("div");
+      row.className = `msg-row ${role}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = `bubble ${role}`;
+      bubble.textContent = text;
+
+      row.appendChild(bubble);
+
+      if (meta) {
+        const metaEl = document.createElement("div");
+        metaEl.className = "meta-text";
+        metaEl.textContent = meta;
+        row.appendChild(metaEl);
+      }
+
+      chatEl.appendChild(row);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    function setBusy(isBusy) {
+      sendBtn.disabled = isBusy || !sessionId;
+      uploadBtn.disabled = isBusy;
+      statusEl.textContent = isBusy
+        ? "處理中..."
+        : sessionId
+          ? "可以開始提問"
+          : "請先上傳影片";
+    }
+
+    // 上傳影片
+    uploadBtn.onclick = async () => {
+      const f = fileEl.files[0];
+      if (!f) {
+        alert("請選擇影片檔");
+        return;
+      }
+
+      setBusy(true);
+      uploadInfoEl.textContent = "上傳中...";
+      videoInfoEl.textContent = "";
+
       try {
         const fd = new FormData();
         fd.append("file", f);
-        const res = await fetch("/upload", { method: "POST", body: fd });
+
+        const res = await fetch("/upload", {
+          method: "POST",
+          body: fd,
+        });
+
         const data = await res.json();
-        if (!data.ok) throw new Error(data.error || "上傳失敗");
-        videoId = data.video_id;
-        totalFrames = data.frames || 0;
-        fps = data.fps || 0;
-        $("uploadInfo").textContent = `已上傳：${videoId}（幀數：約 ${totalFrames}、FPS：${fps.toFixed(2)}）`;
-        $("btnAsk").disabled = false;
+        if (!data.ok) {
+          throw new Error(data.error || "上傳失敗");
+        }
+
+        // 儲存 sessionId & 影片資訊
+        sessionId = data.session_id;
+        videoMeta = data.meta;
+
+        uploadInfoEl.textContent = "✅ 上傳完成";
+        sendBtn.disabled = false;
+
+        // 顯示影片基本資訊
+        const m = data.meta || {};
+        const lines = [];
+        lines.push(`檔名：${data.filename || "(未知檔名)"}`);
+        if (m.width && m.height) lines.push(`解析度：${m.width} x ${m.height}`);
+        if (m.fps) lines.push(`FPS：${m.fps.toFixed(2)}`);
+        if (m.frame_count) lines.push(`總幀數：${m.frame_count}`);
+        if (m.duration) lines.push(`時長：約 ${m.duration.toFixed(2)} 秒`);
+        videoInfoEl.textContent = lines.join("\n");
+
+        appendMessage(
+          "assistant",
+          "影片已上傳完成！我看到這支影片的基本資訊了，你可以開始問我關於這支影片的問題。",
+        );
+
       } catch (e) {
-        alert(e.message);
-        $("uploadInfo").textContent = "";
+        console.error(e);
+        uploadInfoEl.textContent = "❌ 上傳失敗";
+        alert("上傳失敗：" + e.message);
       } finally {
-        $("btnUpload").disabled = false;
+        setBusy(false);
       }
     };
 
-    $("btnAsk").onclick = async () => {
-      if (!videoId) { alert("請先上傳影片"); return; }
-      const q = $("query").value.trim();
-      if (!q) { alert("請輸入問題"); return; }
-      const model = $("model").value;
-      $("btnAsk").disabled = true;
-      $("result").style.display = "none";
+    // 發送問題
+    async function sendQuestion() {
+      if (!sessionId) {
+        alert("請先上傳影片");
+        return;
+      }
+      const text = queryEl.value.trim();
+      if (!text) {
+        alert("請輸入問題");
+        return;
+      }
+
+      // 顯示使用者訊息
+      appendMessage("user", text);
+      queryEl.value = "";
+
+      setBusy(true);
+
       try {
-        const res = await fetch("/ask", {
+        const res = await fetch("/chat", {
           method: "POST",
-          headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({ query: q, model_name: model })
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            question: text,
+          }),
         });
 
         const raw = await res.text();
@@ -93,35 +332,38 @@
         try {
           data = JSON.parse(raw);
         } catch (e) {
-          console.error("Server returned non-JSON:", raw);
-          alert("後端回傳的不是 JSON，原始內容如下：\n" + raw);
+          appendMessage("assistant", "⚠️ 伺服器回傳非 JSON：\n" + raw);
           return;
         }
 
         if (!data.ok) {
-          alert("後端錯誤：" + (data.error || "未知錯誤"));
+          appendMessage(
+            "assistant",
+            "❌ 發生錯誤：" + (data.error || "未知錯誤"),
+          );
           return;
         }
 
-        if (!data.ok) throw new Error(data.error || "查詢失敗");
-        $("answer").textContent = data.answer;
-        $("meta").textContent = data.found
-          ? `grid=${data.grid9}  center=${JSON.stringify(data.center)}  bbox=${JSON.stringify(data.bbox)}`
-          : ``;
-        const wrap = $("imgWrap");
-        wrap.innerHTML = "";
-        if (data.image_url) {
-          const img = new Image();
-          img.src = data.image_url + "?t=" + Date.now();
-          wrap.appendChild(img);
-        }
-        $("result").style.display = "block";
+        appendMessage("assistant", data.answer || "(空回覆)");
+
       } catch (e) {
-        alert(e.message);
+        console.error(e);
+        appendMessage("assistant", "❌ 連線失敗：" + e.message);
       } finally {
-        $("btnAsk").disabled = false;
+        setBusy(false);
       }
-    };
+    }
+
+    sendBtn.onclick = sendQuestion;
+    queryEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendQuestion();
+      }
+    });
+
+    // 初始狀態
+    setBusy(false);
   </script>
 </body>
 </html>

@@ -16,3 +16,6 @@ opencv-python
 pillow
 ultralytics
 ollama
+
+python-dotenv
+
