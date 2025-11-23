@@ -54,3 +54,27 @@ ollama部份現在是直接呼叫我本機220.132.170.233的，所以如果是�
 
 ## 筆記
 markdown preview快捷鍵 ctrl-shift-v
+
+
+```mermaid
+graph LR
+  subgraph HOST[物理機 / VM（HPC 主機）]
+    subgraph docker[Docker Daemon]
+      BE[tennis-backend<br/>FastAPI 容器<br/>port 8000]
+      QW[qwen3vl<br/>Qwen3-VL API<br/>port 2333]
+      CF[cftunnel<br/>Cloudflare Tunnel]
+    end
+  end
+
+  U[使用者瀏覽器] -->|HTTPS<br/>POST /api/chat| FE[前端網頁 / Nginx]
+  FE -->|HTTP<br/>POST /api/analyze| BE
+  BE -->|HTTP<br/>POST /chat-vl| QW
+  QW -->|JSON 回傳結果| BE
+  BE -->|JSON API Response| FE
+  FE -->|顯示分析結果| U
+
+  %% 網路模式備註
+  classDef hostnet fill:#fff3,stroke:#333,stroke-width:1px,stroke-dasharray: 3 3;
+  class BE,QW,CF hostnet;
+  %% 註解：這三個容器都使用 --network=host
+```
