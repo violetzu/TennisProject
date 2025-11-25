@@ -15,7 +15,7 @@
     }
     .app {
       width: 100%;
-      max-width: 960px;
+      max-width: 1200px;
       height: 100vh;
       display: flex;
       flex-direction: column;
@@ -75,6 +75,59 @@
       white-space: pre-wrap;
     }
 
+    /* 主區塊：左影片 + 右聊天 */
+    .main-panel {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    .video-column {
+      width: 45%;
+      border-right: 1px solid #e5e7eb;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .video-wrapper {
+      width: 100%;
+      max-width: 640px;
+      aspect-ratio: 16 / 9;
+      background: #111827;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      outline: none;
+    }
+    .video-hint {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      right: 8px;
+      font-size: 12px;
+      color: #e5e7eb;
+      background: rgba(15, 23, 42, 0.7);
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+
+    .chat-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #f9fafb;
+    }
+
     #chat {
       flex: 1;
       overflow-y: auto;
@@ -93,7 +146,7 @@
       justify-content: flex-start;
     }
     .bubble {
-      max-width: 70%;
+      max-width: 80%;
       padding: 10px 12px;
       border-radius: 12px;
       font-size: 14px;
@@ -162,6 +215,17 @@
       font-size: 12px;
       color: #6b7280;
     }
+
+    @media (max-width: 900px) {
+      .main-panel {
+        flex-direction: column;
+      }
+      .video-column {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #e5e7eb;
+      }
+    }
   </style>
 </head>
 <body>
@@ -169,7 +233,7 @@
     <header>
       <div>
         <h1>網球比賽分析助手</h1>
-        <span>上傳一次影片，之後像 ChatGPT 一樣來回提問</span>
+        <span>上傳一次影片，左側看 YOLO 標註，右側像 ChatGPT 一樣提問</span>
       </div>
       <span id="status">請先上傳影片</span>
     </header>
@@ -183,15 +247,33 @@
       <div id="videoInfo"></div>
     </div>
 
-    <div id="chat"></div>
-
-    <div class="composer">
-      <textarea id="query" placeholder="輸入你的問題，例如：『這一球誰佔優勢？為什麼？』"></textarea>
-      <div class="composer-bottom">
-        <div class="hint">
-          影片只需上傳一次，之後所有問題都會針對同一支影片回答。
+    <div class="main-panel">
+      <!-- 左邊：YOLO 標註影片 / 或原始影片 -->
+      <div class="video-column">
+        <div class="video-wrapper">
+          <video id="yoloVideo" controls></video>
+          <div id="videoHint" class="video-hint">
+            上傳影片後，這裡會顯示 YOLO 標註 (球 + 人體骨架) 的影片；若無法產生則顯示原始影片。
+          </div>
         </div>
-        <button class="send-btn" id="sendBtn" disabled>送出</button>
+      </div>
+
+      <!-- 右邊：聊天區 -->
+      <div class="chat-column">
+        <div id="chat"></div>
+
+        <div class="composer">
+          <textarea
+            id="query"
+            placeholder="輸入你的問題，例如：『這一球誰佔優勢？為什麼？』"
+          ></textarea>
+          <div class="composer-bottom">
+            <div class="hint">
+              影片只需上傳一次，之後所有問題都會針對同一支影片回答。
+            </div>
+            <button class="send-btn" id="sendBtn" disabled>送出</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -207,6 +289,8 @@
     const queryEl = $("query");
     const sendBtn = $("sendBtn");
     const statusEl = $("status");
+    const yoloVideoEl = $("yoloVideo");
+    const videoHintEl = $("videoHint");
 
     let sessionId = null; // 後端用來綁定這支影片 & 對話記憶
     let videoMeta = null; // 前端顯示用
@@ -251,8 +335,9 @@
       }
 
       setBusy(true);
-      uploadInfoEl.textContent = "上傳中...";
+      uploadInfoEl.textContent = "上傳與 YOLO 處理中...";
       videoInfoEl.textContent = "";
+      videoHintEl.textContent = "YOLO 處理中，請稍候...";
 
       try {
         const fd = new FormData();
@@ -272,7 +357,7 @@
         sessionId = data.session_id;
         videoMeta = data.meta;
 
-        uploadInfoEl.textContent = "✅ 上傳完成";
+        uploadInfoEl.textContent = "✅ 上傳完成（已嘗試產生 YOLO 標註影片）";
         sendBtn.disabled = false;
 
         // 顯示影片基本資訊
@@ -282,17 +367,36 @@
         if (m.width && m.height) lines.push(`解析度：${m.width} x ${m.height}`);
         if (m.fps) lines.push(`FPS：${m.fps.toFixed(2)}`);
         if (m.frame_count) lines.push(`總幀數：${m.frame_count}`);
-        if (m.duration) lines.push(`時長：約 ${m.duration.toFixed(2)} 秒`);
+        if (m.duration) lines.push(`試算時長：約 ${m.duration.toFixed(2)} 秒`);
         videoInfoEl.textContent = lines.join("\n");
+
+        // 設定左側影片：優先 YOLO，否則原始
+        if (data.yolo_video_url) {
+          yoloVideoEl.src = data.yolo_video_url;
+          yoloVideoEl.style.display = "block";
+          videoHintEl.textContent =
+            "這是 YOLO 標註後的影片（球 + 人體骨架）。可以播放、暫停在特定片段，再到右側提問。";
+        } else if (data.raw_video_url) {
+          yoloVideoEl.src = data.raw_video_url;
+          yoloVideoEl.style.display = "block";
+          videoHintEl.textContent =
+            "目前顯示原始影片。YOLO 標註影片無法產生，原因：" +
+            (data.yolo_error || "未知錯誤");
+        } else {
+          yoloVideoEl.removeAttribute("src");
+          videoHintEl.textContent =
+            "後端沒有回傳可播放的影片路徑。";
+        }
 
         appendMessage(
           "assistant",
-          "影片已上傳完成！我看到這支影片的基本資訊了，你可以開始問我關於這支影片的問題。",
+          "影片已上傳完成！左側是與你問題對應的影片畫面（優先顯示 YOLO 標註），右側你可以開始問我關於這支影片的問題。"
         );
 
       } catch (e) {
         console.error(e);
         uploadInfoEl.textContent = "❌ 上傳失敗";
+        videoHintEl.textContent = "上傳或 YOLO 處理失敗。";
         alert("上傳失敗：" + e.message);
       } finally {
         setBusy(false);
@@ -332,14 +436,14 @@
         try {
           data = JSON.parse(raw);
         } catch (e) {
-          appendMessage("assistant", "⚠️ 伺服器回傳非 JSON：\n" + raw);
+          appendMessage("assistant", "伺服器回傳非 JSON：\n" + raw);
           return;
         }
 
         if (!data.ok) {
           appendMessage(
             "assistant",
-            "❌ 發生錯誤：" + (data.error || "未知錯誤"),
+            "發生錯誤：" + (data.error || "未知錯誤"),
           );
           return;
         }
@@ -348,7 +452,7 @@
 
       } catch (e) {
         console.error(e);
-        appendMessage("assistant", "❌ 連線失敗：" + e.message);
+        appendMessage("assistant", "連線失敗：" + e.message);
       } finally {
         setBusy(false);
       }
