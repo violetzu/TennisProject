@@ -12,7 +12,7 @@ from typing import Optional, Dict, List
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
@@ -48,7 +48,7 @@ BALL_MODEL = None
 POSE_MODEL = None
 
 # 多模態模型 API 設定
-QWEN_VL_URL = "http://qwen3vl:2333/chat-vl"
+QWEN_VL_URL = "http://qwen3vl:2333/chat-vl2"
 API_KEY = os.getenv("API_KEY", None)
 
 # SESSION 儲存區：存放分析狀態、進度與結果
@@ -210,53 +210,95 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     """
     與 LLM (Qwen-VL) 對話的 API。
-    會將影片檔案、歷史對話紀錄以及系統提示詞打包送給模型服務。
+    改成串流模式：後端轉發 chat-vl2 的文字流，前端即時顯示。
     """
     sess = SESSION_STORE.get(req.session_id)
-    if not sess: return {"ok": False, "error": "無效 session"}
+    if not sess:
+        raise HTTPException(400, "無效 session")
     
     sys_prompt = "你是網球分析助手。"
     p_path = Path("tennis_prompt.txt") 
     if p_path.exists():
-        with open(p_path, "r", encoding="utf-8") as f: sys_prompt = f.read().strip()
+        with open(p_path, "r", encoding="utf-8") as f:
+            sys_prompt = f.read().strip()
 
     history = sess["history"]
     # 組合 Prompt 上下文
     parts = [f"影片: {sess['filename']}"]
-    if sess["ball_tracks"]: parts.append("(已有 YOLO 分析數據)")
+    if sess["ball_tracks"]:
+        parts.append("(已有 YOLO 分析數據)")
     if history:
         parts.append("歷史對話:")
-        for h in history[-10:]: parts.append(f"Q:{h['user']} A:{h['assistant']}")
+        for h in history[-10:]:
+            parts.append(f"Q:{h['user']} A:{h['assistant']}")
     parts.append(f"新問題: {req.question}")
     user_txt = "\n".join(parts)
 
     # 構建多模態訊息格式
     msgs = [
         {"role": "system", "content": [{"type": "text", "text": sys_prompt}]},
-        {"role": "user", "content": [{"type": "video", "video_url": "video"}, {"type": "text", "text": user_txt}]}
+        {"role": "user", "content": [
+            {"type": "video", "video_url": "video"},
+            {"type": "text", "text": user_txt}
+        ]}
     ]
 
-    try:
-        with open(sess["video_path"], "rb") as vf:
-            resp = requests.post(
-                QWEN_VL_URL,
-                headers={"X-API-Key": API_KEY},
-                files={"file": (sess["filename"], vf, "video/mp4")},
-                data={"messages": json.dumps(msgs), "max_new_tokens": "2048"},
-                timeout=600
-            )
-        if not resp.ok: return {"ok": False, "error": f"API Error: {resp.text}"}
-        ans = resp.json().get("text", "")
-        # 更新對話歷史
-        history.append({"user": req.question, "assistant": ans})
-        return {"ok": True, "answer": ans}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    if not os.path.exists(sess["video_path"]):
+        raise HTTPException(500, "找不到影片檔")
+
+    def token_generator():
+        """
+        同步 generator：
+        1. 呼叫 QWEN_VL_URL (chat-vl2) 開啟 HTTP 串流
+        2. 一邊 yield chunk 給前端
+        3. 同時累積完整回答，最後寫入 history
+        """
+        answer_chunks = []
+        try:
+            with open(sess["video_path"], "rb") as vf:
+                resp = requests.post(
+                    QWEN_VL_URL,
+                    headers={"X-API-Key": API_KEY} if API_KEY else {},
+                    files={"file": (sess["filename"], vf, "video/mp4")},
+                    data={"messages": json.dumps(msgs), "max_new_tokens": "2048"},
+                    timeout=600,
+                    stream=True,  # 關鍵：開啟 HTTP 串流
+                )
+            
+            if not resp.ok:
+                err_text = f"[API Error {resp.status_code}: {resp.text}]"
+                yield err_text
+                return
+
+            # iter_content 會隨著對方 chunk 傳過來
+            for chunk in resp.iter_content(chunk_size=128, decode_unicode=True):
+                if not chunk:
+                    continue
+                answer_chunks.append(chunk)
+                yield chunk
+
+        except Exception as e:
+            err_text = f"[Error: {str(e)}]"
+            yield err_text
+        finally:
+            # 串流結束後把完整回答存進 session history
+            if answer_chunks:
+                full_ans = "".join(answer_chunks)
+                sess["history"].append({
+                    "user": req.question,
+                    "assistant": full_ans
+                })
+
+    # 回傳純文字串流
+    return StreamingResponse(
+        token_generator(),
+        media_type="text/plain; charset=utf-8"
+    )
 
 class AnalyzeRequest(BaseModel):
     session_id: str
     max_frames: Optional[int] = 300
-
+    
 @app.post("/analyze_yolo")
 async def analyze_yolo_api(req: AnalyzeRequest, background_tasks: BackgroundTasks):
     """

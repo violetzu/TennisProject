@@ -264,24 +264,81 @@
     };
 
     async function sendQuestion() {
-      if (!sessionId) { alert("請先上傳影片"); return; }
-      const text = queryEl.value.trim(); if (!text) { alert("請輸入問題"); return; }
-      appendMessage("user", text); queryEl.value = ""; setBusy(true);
-      try {
-        const res = await fetch("/chat", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, question: text }),
-        });
-        const raw = await res.text();
-        let data; try { data = JSON.parse(raw); } catch (e) { appendMessage("assistant", "API 回傳非 JSON:\n" + raw); return; }
-        if (!data.ok) { appendMessage("assistant", "錯誤：" + (data.error || "未知")); return; }
-        appendMessage("assistant", data.answer || "(空)");
-      } catch (e) { console.error(e); appendMessage("assistant", "連線失敗：" + e.message); } finally { setBusy(false); }
-    }
+    if (!sessionId) { alert("請先上傳影片"); return; }
+    const text = queryEl.value.trim();
+    if (!text) { alert("請輸入問題"); return; }
 
-    sendBtn.onclick = sendQuestion;
-    queryEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendQuestion(); } });
-    setBusy(false);
-  </script>
+    // 使用者訊息先畫出來
+    appendMessage("user", text);
+    queryEl.value = "";
+
+    // 建立空的 assistant 泡泡，等等一路更新內容
+    const row = document.createElement("div");
+    row.className = "msg-row assistant";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble assistant";
+    bubble.textContent = ""; // 先空字串
+    row.appendChild(bubble);
+    chatEl.appendChild(row);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    setBusy(true);
+
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, question: text }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        bubble.textContent = "錯誤：" + (errText || res.statusText);
+        return;
+      }
+
+      // 串流讀取
+      const reader = res.body?.getReader();
+      if (!reader) {
+        // 環境不支援串流，退而求其次整包讀
+        const fallbackText = await res.text();
+        bubble.textContent = fallbackText || "(空)";
+        return;
+      }
+
+      const decoder = new TextDecoder("utf-8");
+      let done = false;
+      let fullText = "";
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        if (value) {
+          const chunkText = decoder.decode(value, { stream: !done });
+          if (chunkText) {
+            fullText += chunkText;
+            bubble.textContent = fullText;
+            chatEl.scrollTop = chatEl.scrollHeight;
+          }
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      bubble.textContent = "連線失敗：" + e.message;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  sendBtn.onclick = sendQuestion;
+  queryEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendQuestion();
+    }
+  });
+
+  setBusy(false);
+</script>
 </body>
 </html>
