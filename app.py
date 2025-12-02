@@ -35,9 +35,6 @@ try:
 except ImportError:
     cv2 = None
 
-
-
-
 # 路徑設定
 BASE_DIR = Path(__file__).parent
 VIDEO_DIR = BASE_DIR / "videos"
@@ -106,6 +103,8 @@ app = FastAPI(title="Tennis Video Backend", lifespan=lifespan)
 
 # 掛載靜態檔案目錄，讓前端可以透過 URL 存取影片
 app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 # 設定 CORS，允許跨網域請求 (開發階段通常設為 *)
 app.add_middleware(
