@@ -1,365 +1,608 @@
-    :root {
-      --glass-bg-light: rgba(255, 255, 255, 0.35);
-      --glass-bg-dark: rgba(0, 0, 0, 0.35);
-      --glass-border-light: rgba(255,255,255,0.6);
-      --glass-border-dark: rgba(255,255,255,0.15);
-      --text-light: #111827;
-      --text-dark: #e5e7eb;
-      --bg-light: radial-gradient(circle at 0% 0%, #e0f2fe 0%, #ffffff 55%, #e5e7eb 100%);
-      --bg-dark: radial-gradient(circle at 0% 0%, #1f2937 0%, #020617 55%, #000000 100%);
-    }
+:root {
+  --glass-bg-light: rgba(255, 255, 255, 0.35);
+  --glass-bg-dark: rgba(0, 0, 0, 0.35);
+  --glass-border-light: rgba(255, 255, 255, 0.6);
+  --glass-border-dark: rgba(255, 255, 255, 0.15);
+  --text-light: #111827;
+  --text-dark: #e5e7eb;
+  --bg-light: radial-gradient(circle at 0% 0%, #e0f2fe 0%, #ffffff 55%, #e5e7eb 100%);
+  --bg-dark: radial-gradient(circle at 0% 0%, #1f2937 0%, #020617 55%, #000000 100%);
+}
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: "Noto Sans TC", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: "Noto Sans TC", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
 
-    body.light { background: var(--bg-light); color: var(--text-light); }
-    body.dark  { background: var(--bg-dark);  color: var(--text-dark); }
+body.light {
+  background: var(--bg-light);
+  color: var(--text-light);
+}
 
-    /* ======= 通用玻璃樣式 ======= */
-    /* ===== 更細膩、完全不突兀的 Apple-style 浮動 ===== */
-    .glass-base {
-      backdrop-filter: blur(20px) saturate(160%);
-      -webkit-backdrop-filter: blur(20px) saturate(160%);
-      background: var(--glass-bg-light);
-      border-radius: 18px;
-      border: 1px solid var(--glass-border-light);
-      box-shadow: 0 8px 22px rgba(15,23,42,0.12);
-      transition:
-        transform .25s ease-out,
-        box-shadow .25s ease-out,
-        background .25s ease,
-        border-color .25s ease;
-    }
+body.dark {
+  background: var(--bg-dark);
+  color: var(--text-dark);
+}
 
-    body.dark .glass-base {
-      background: var(--glass-bg-dark);
-      border-color: var(--glass-border-dark);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-    }
+/* ======= 通用玻璃樣式 ======= */
+/* ===== 更細膩、完全不突兀的 Apple-style 浮動 ===== */
+.glass-base {
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: var(--glass-bg-light);
+  border-radius: 18px;
+  border: 1px solid var(--glass-border-light);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  transition:
+    transform .25s ease-out,
+    box-shadow .25s ease-out,
+    background .25s ease,
+    border-color .25s ease;
+}
 
-    .glass-base:hover {
-      /* 🔹不放大，只輕微上浮 2px */
-      transform: translateY(-2px);
+body.dark .glass-base {
+  background: var(--glass-bg-dark);
+  border-color: var(--glass-border-dark);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
 
-      /* 🔹更柔、更內斂的陰影 */
-      box-shadow: 0 12px 28px rgba(15,23,42,0.18);
-    }
+.glass-base:hover {
+  /* 🔹不放大，只輕微上浮 2px */
+  transform: translateY(-2px);
+
+  /* 🔹更柔、更內斂的陰影 */
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+}
 
 
-    /* ======= Header ======= */
-    header {
-      height: 64px;
-      padding: 12px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-    }
+/* ======= Header ======= */
+header {
+  height: 64px;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
 
-    .header-chip {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 18px;
-      height: 40px;
-      font-size: 14px;
-      font-weight: 600;
-      color: inherit;
-      background: radial-gradient(circle at 0 0, rgba(255,255,255,0.6), rgba(255,255,255,0.05));
-    }
-    body.dark .header-chip {
-      background: radial-gradient(circle at 0 0, rgba(148,163,184,0.3), rgba(15,23,42,0.8));
-    }
+.header-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
-    #themeToggle {
-      border: none;
-      cursor: pointer;
-      padding: 0 12px;
-      gap: 6px;
-      color: inherit;
-    }
+  /* 原本 font-size 大約 14px，把它變 28px (兩倍) */
+  font-size: 28px;
+  font-weight: 700;
 
-    #themeToggle svg {
-      width: 22px;
-      height: 22px;
-      fill: currentColor;
-      transition: transform .4s ease, opacity .25s ease;
-    }
-    body.light #moonIcon { opacity: 0; transform: scale(0.5); }
-    body.light #sunIcon  { opacity: 1; transform: scale(1); }
-    body.dark  #moonIcon { opacity: 1; transform: scale(1); }
-    body.dark  #sunIcon  { opacity: 0; transform: scale(0.5); }
+  /* 讓上下不要太空 → 高度變 50px 不要 40px */
+  height: 50px;
+  padding: 0 16px;
 
-    /* ======= 主 Layout ======= */
-    .main {
-      padding: 12px 20px 20px;
-      display: flex;
-      gap: 20px;
-      height: calc(100vh - 64px);
-    }
+  border-radius: 18px;
+  background: radial-gradient(circle at 0 0, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.05));
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
 
-    /* LLM 卡 */
-    .llm-card {
-      @supports not (backdrop-filter: blur(1px)) {}
-      width: 32%;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      padding: 0;
-    }
+body.dark .header-chip {
+  background: radial-gradient(circle at 0 0, rgba(148, 163, 184, 0.3), rgba(15, 23, 42, 0.8));
+}
 
-    #chat {
-      flex: 1;
-      overflow-y: auto;
-      padding: 14px 16px;
-    }
 
-    .composer {
-      border-top: 1px solid rgba(255,255,255,0.35);
-      padding: 10px 12px 12px;
-    }
-    body.dark .composer {
-      border-top-color: rgba(15,23,42,0.8);
-    }
+/* ===== 夜間 / 日間 動態切換開關 ===== */
 
-    #query {
-      width: 100%;
-      min-height: 60px;
-      max-height: 150px;
-      resize: none;
-      font-size: 14px;
-      padding: 8px 10px;
-      border-radius: 12px;
-      border: 1px solid rgba(148,163,184,0.7);
-      outline: none;
-      background: rgba(255,255,255,0.8);
-    }
-    body.dark #query {
-      background: rgba(15,23,42,0.8);
-      border-color: rgba(148,163,184,0.6);
-      color: var(--text-dark);
-    }
+.theme-toggle {
+  position: relative;
+  width: 130px;
+  height: 44px;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  background: transparent;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+}
 
-    .send-btn {
-      margin-top: 8px;
-      width: 100%;
-      padding: 8px 0;
-      border-radius: 999px;
-      border: none;
-      font-size: 14px;
-      font-weight: 500;
-      background: linear-gradient(135deg,#111827,#020617);
-      color: #f9fafb;
-      cursor: pointer;
-    }
-    .send-btn:disabled {
-      opacity: .5;
-      cursor: not-allowed;
-    }
+/* 裡面的軌道 */
+.ts-track {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+}
 
-    /* Chat bubble */
-    .msg-row { display: flex; margin-bottom: 10px; }
-    .msg-row.user { justify-content: flex-end; }
-    .bubble {
-      padding: 9px 13px;
-      border-radius: 14px;
-      max-width: 82%;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 14px;
-    }
-    .bubble.user {
-      background: #111827;
-      color: #f9fafb;
-      border-bottom-right-radius: 2px;
-    }
-    .bubble.assistant {
-      background: rgba(255,255,255,0.85);
-      color: #111827;
-      border-bottom-left-radius: 2px;
-    }
-    body.dark .bubble.assistant {
-      background: rgba(15,23,42,0.9);
-      color: #e5e7eb;
-    }
+/* 兩層天空：白天 & 夜晚 疊在一起，靠 transform 切換 */
+.ts-sky {
+  position: absolute;
+  inset: 0;
+  transition: opacity .5s ease, transform .5s ease;
+}
 
-    /* 右側區域 */
-    .right-col {
-      width: 68%;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
+/* 白天：藍天 */
+.ts-sky-day {
+  background: linear-gradient(135deg, #bfdbfe 0%, #60a5fa 45%, #38bdf8 100%);
+}
 
-    /* 控制卡 */
-    .control-card {
-      padding: 14px 16px 10px;
-      height: 190px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
+/* 夜晚：深藍星空底 */
+.ts-sky-night {
+  background: radial-gradient(circle at 20% 0%, #1d4ed8 0%, #020617 60%, #000 100%);
+}
 
-    .control-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+/* light 狀態只顯示白天 */
+body.light .ts-sky-day {
+  opacity: 1;
+  transform: translateX(0);
+}
 
-    .btn {
-      padding: 8px 16px;
-      font-size: 14px;
-      border-radius: 999px;
-      border: none;
-      cursor: pointer;
-      background: #111827;
-      color: #f9fafb;
-      box-shadow: 0 4px 10px rgba(15,23,42,0.4);
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      box-shadow: none;
-    }
+body.light .ts-sky-night {
+  opacity: 0;
+  transform: translateX(20px);
+}
 
-    .btn-green {
-      background: linear-gradient(135deg,#22c55e,#4ade80);
-      color: #022c22;
-    }
+/* dark 狀態只顯示夜晚 */
+body.dark .ts-sky-day {
+  opacity: 0;
+  transform: translateX(-20px);
+}
 
-    .progress-bar-wrap {
-      width: 190px;
-      height: 8px;
-      background: rgba(148,163,184,0.45);
-      border-radius: 4px;
-      overflow: hidden;
-      margin-left: auto;
-      display: none;
-    }
-    .progress-bar {
-      width: 0%;
-      height: 100%;
-      background: #22c55e;
-      transition: width .3s ease;
-    }
+body.dark .ts-sky-night {
+  opacity: 1;
+  transform: translateX(0);
+}
 
-    #status {
-      font-size: 12px;
-      opacity: 0.8;
-    }
+/* 星星群 */
+.ts-stars::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 18px;
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  box-shadow:
+    10px 2px 0 #e5e7eb,
+    24px 5px 0 #e5e7eb,
+    38px 1px 0 #e5e7eb,
+    52px 4px 0 #e5e7eb,
+    70px 3px 0 #e5e7eb,
+    88px 6px 0 #e5e7eb;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity .4s ease, transform .4s ease;
+}
 
-    #videoInfo {
-      font-size: 13px;
-      line-height: 1.35;
-      white-space: pre-line;
-    }
+/* 夜晚才亮起來 */
+body.dark .ts-stars::before {
+  opacity: 0.95;
+  transform: translateY(0);
+}
 
-    .frame-sync {
-      margin-top: auto;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      justify-content: flex-end;
-      font-size: 12px;
-    }
+/* 雲層：前後兩層做一點 parallax */
+.ts-clouds {
+  position: absolute;
+  bottom: -4px;
+  left: 10px;
+  width: 52px;
+  height: 18px;
+  border-radius: 999px;
+  background: #f9fafb;
+  box-shadow:
+    20px -4px 0 0 #f9fafb,
+    40px -1px 0 0 #f9fafb,
+    60px -5px 0 0 #f9fafb;
+  opacity: 0.96;
+  transition: transform .6s ease;
+}
 
-    .sync-btn {
-      padding: 3px 10px;
-      border-radius: 999px;
-      border: none;
-      background: rgba(15,23,42,0.85);
-      color: #e5e7eb;
-      cursor: pointer;
-      font-size: 12px;
-      box-shadow: 0 4px 10px rgba(15,23,42,0.5);
-    }
-    .sync-btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-      box-shadow: none;
-    }
+.ts-clouds-back {
+  opacity: 0.8;
+  transform: scale(1.05) translateX(2px);
+}
 
-    /* 影片卡 */
-    .video-card {
-      flex: 1;
-      padding: 0;
-      overflow: hidden;
-      position: relative;
-    }
+/* 夜晚雲偏灰一點 */
+body.dark .ts-clouds,
+body.dark .ts-clouds-back {
+  background: #e5e7eb;
+  box-shadow:
+    20px -4px 0 0 #e5e7eb,
+    40px -1px 0 0 #e5e7eb,
+    60px -5px 0 0 #e5e7eb;
+}
 
-    .video-wrapper {
-      width: 100%;
-      height: 100%;
-      position: relative;
-      border-radius: 18px;
-      overflow: hidden;
-    }
+/* 切換時雲順便滑一下，製造流動感 */
+body.light .ts-clouds {
+  transform: translateX(0);
+}
 
-    #videoPlayer {
-      width: 100%;
-      height: 100%;
-      display: none;
-      object-fit: contain;
-      background: #000;
-    }
+body.dark .ts-clouds {
+  transform: translateX(4px);
+}
 
-    #overlay {
-      position: absolute;
-      left: 0;
-      top: 0;
-      pointer-events: none;
-    }
+body.light .ts-clouds-back {
+  transform: scale(1.05) translateX(0);
+}
 
-    /* Placeholder / 拖曳上傳 */
-    #videoPlaceholder {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      text-align: center;
-      color: rgba(15,23,42,0.75);
-      cursor: pointer;
-    }
-    body.dark #videoPlaceholder {
-      color: rgba(226,232,240,0.9);
-    }
-    #videoPlaceholder img {
-      width: 80px;
-      opacity: 0.85;
-    }
-    .drop-active {
-      outline: 2px dashed rgba(56,189,248,0.9);
-      outline-offset: -6px;
-      background: radial-gradient(circle at 10% 0%, rgba(56,189,248,0.16), transparent 60%);
-    }
+body.dark .ts-clouds-back {
+  transform: scale(1.05) translateX(6px);
+}
 
-    .vp-upload-btn {
-      padding: 7px 18px;
-      border-radius: 999px;
-      border: none;
-      background: linear-gradient(135deg,#111827,#020617);
-      color: #f9fafb;
-      font-size: 14px;
-      cursor: pointer;
-    }
+/* 太陽 / 月亮本體 */
+.ts-orb {
+  position: relative;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  margin-left: 8px;
+  transition: transform .45s cubic-bezier(.22, .61, .36, 1);
+}
 
-    /* 響應式簡單處理 */
-    @media (max-width: 960px) {
-      .main {
-        flex-direction: column;
-        height: auto;
-      }
-      .llm-card, .right-col {
-        width: 100%;
-      }
-      .video-card {
-        height: 320px;
-      }
-    }
+/* 內部做一點光暈 */
+.ts-orb-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  box-shadow: 0 8px 14px rgba(15, 23, 42, 0.45);
+  transition: background .4s ease, box-shadow .4s ease;
+}
+
+/* 白天：左邊太陽，橘色＋柔和陰影 */
+body.light .ts-orb {
+  transform: translateX(0);
+}
+
+body.light .ts-orb-inner {
+  background: radial-gradient(circle at 30% 30%, #fed7aa 0%, #fb923c 50%, #ea580c 100%);
+  box-shadow: 0 8px 14px rgba(248, 113, 113, 0.55);
+}
+
+/* 夜晚：右邊月亮＋冷色陰影 */
+body.dark .ts-orb {
+  transform: translateX(72px);
+}
+
+body.dark .ts-orb-inner {
+  background: radial-gradient(circle at 30% 30%, #f9fafb 0%, #cbd5f5 55%, #94a3b8 100%);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.75);
+}
+
+/* 讓整個開關 hover 只有很輕微的浮動 */
+.theme-toggle.glass-base:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.28);
+}
+
+#themeToggle {
+  border: none;
+  cursor: pointer;
+  padding: 0 12px;
+  gap: 6px;
+  color: inherit;
+}
+
+#themeToggle svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+  transition: transform .4s ease, opacity .25s ease;
+}
+
+body.light #moonIcon {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+body.light #sunIcon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+body.dark #moonIcon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+body.dark #sunIcon {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+/* ======= 主 Layout ======= */
+.main {
+  padding: 12px 20px 20px;
+  display: flex;
+  gap: 20px;
+  height: calc(100vh - 64px);
+}
+
+/* LLM 卡 */
+.llm-card {
+  @supports not (backdrop-filter: blur(1px)) {}
+
+  width: 32%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.composer {
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  padding: 10px 12px 12px;
+}
+
+body.dark .composer {
+  border-top-color: rgba(15, 23, 42, 0.8);
+}
+
+#query {
+  width: 100%;
+  min-height: 60px;
+  max-height: 150px;
+  resize: none;
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  outline: none;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+body.dark #query {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(148, 163, 184, 0.6);
+  color: var(--text-dark);
+}
+
+.send-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px 0;
+  border-radius: 999px;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  background: linear-gradient(135deg, #111827, #020617);
+  color: #f9fafb;
+  cursor: pointer;
+}
+
+.send-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Chat bubble */
+.msg-row {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.msg-row.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  padding: 9px 13px;
+  border-radius: 14px;
+  max-width: 82%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+.bubble.user {
+  background: #111827;
+  color: #f9fafb;
+  border-bottom-right-radius: 2px;
+}
+
+.bubble.assistant {
+  background: rgba(255, 255, 255, 0.85);
+  color: #111827;
+  border-bottom-left-radius: 2px;
+}
+
+body.dark .bubble.assistant {
+  background: rgba(15, 23, 42, 0.9);
+  color: #e5e7eb;
+}
+
+/* 右側區域 */
+.right-col {
+  width: 68%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 控制卡 */
+.control-card {
+  padding: 14px 16px 10px;
+  height: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn {
+  padding: 8px 16px;
+  font-size: 14px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: #111827;
+  color: #f9fafb;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.4);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-green {
+  background: linear-gradient(135deg, #22c55e, #4ade80);
+  color: #022c22;
+}
+
+.progress-bar-wrap {
+  width: 190px;
+  height: 8px;
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-left: auto;
+  display: none;
+}
+
+.progress-bar {
+  width: 0%;
+  height: 100%;
+  background: #22c55e;
+  transition: width .3s ease;
+}
+
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#videoInfo {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
+.frame-sync {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+  font-size: 12px;
+}
+
+.sync-btn {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15, 23, 42, 0.85);
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 12px;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.5);
+}
+
+.sync-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 影片卡 */
+.video-card {
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.video-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+#videoPlayer {
+  width: 100%;
+  height: 100%;
+  display: none;
+  object-fit: contain;
+  background: #000;
+}
+
+#overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* Placeholder / 拖曳上傳 */
+#videoPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.75);
+  cursor: pointer;
+}
+
+body.dark #videoPlaceholder {
+  color: rgba(226, 232, 240, 0.9);
+}
+
+#videoPlaceholder img {
+  width: 80px;
+  opacity: 0.85;
+}
+
+.drop-active {
+  outline: 2px dashed rgba(56, 189, 248, 0.9);
+  outline-offset: -6px;
+  background: radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.16), transparent 60%);
+}
+
+.vp-upload-btn {
+  padding: 7px 18px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, #111827, #020617);
+  color: #f9fafb;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* 響應式簡單處理 */
+@media (max-width: 960px) {
+  .main {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .llm-card,
+  .right-col {
+    width: 100%;
+  }
+
+  .video-card {
+    height: 320px;
+  }
+}

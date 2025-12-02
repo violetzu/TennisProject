@@ -8,8 +8,7 @@
   <!-- 字體 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap">
-
-  <link rel="stylesheet" href="static/index.css" />
+  <link rel="stylesheet" href="static/index.css?v=005" />
 </head>
 
 <body class="light">
@@ -18,15 +17,20 @@
     <div class="glass-base header-chip">
       網球比賽分析助手
     </div>
+    <button id="themeToggle" class="glass-base theme-toggle">
+    <div class="ts-track">
+      <div class="ts-sky ts-sky-day"></div>
+      <div class="ts-sky ts-sky-night"></div>
 
-    <button id="themeToggle" class="glass-base header-chip" style="gap:6px;">
-      <svg id="sunIcon" viewBox="0 0 24 24">
-        <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"/>
-      </svg>
-      <svg id="moonIcon" viewBox="0 0 24 24">
-        <path d="M21 12.79A9 9 0 0 1 11.21 3 7 7 0 1 0 21 12.79Z"/>
-      </svg>
-    </button>
+      <div class="ts-stars"></div>
+      <div class="ts-clouds ts-clouds-front"></div>
+      <div class="ts-clouds ts-clouds-back"></div>
+    </div>
+
+    <div class="ts-orb">
+      <div class="ts-orb-inner"></div>
+    </div>
+  </button>
   </header>
 
   <!-- 主內容 -->
