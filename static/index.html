@@ -1,89 +1,124 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" class="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>網球比賽分析助手</title>
-  <link rel="stylesheet" href="/static/index.css">
-</head>
-<body>
-  <div class="app">
-    <header>
-      <div>
-        <h1>網球比賽分析助手</h1>
-        <span>左邊 LLM 討論，右邊 YOLO 偵測畫面</span>
-      </div>
-      <span id="status">請先上傳影片</span>
-    </header>
 
-    <div class="top-panel">
-      <div class="upload-row">
-        <input id="file" type="file" accept="video/*" />
-        <button id="uploadBtn">上傳影片</button>
-        <button id="analyzeBtn" disabled>跑 YOLO 分析</button>
-        <span id="uploadInfo"></span>
-      </div>
-      <div id="videoInfo"></div>
+  <!-- 字體 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap">
+
+  <link rel="stylesheet" href="static/index.css" />
+</head>
+
+<body class="light">
+  <!-- Header：兩個獨立玻璃塊 -->
+  <header>
+    <div class="glass-base header-chip">
+      網球比賽分析助手
     </div>
 
-    <div class="main">
-      <div class="left-panel">
-        <div id="chat"></div>
-        <div class="composer">
-          <textarea id="query" placeholder="輸入你的問題..."></textarea>
-          <div class="composer-bottom">
-            <div class="hint">針對同一支影片提問。</div>
-            <button class="send-btn" id="sendBtn" disabled>送出</button>
+    <button id="themeToggle" class="glass-base header-chip" style="gap:6px;">
+      <svg id="sunIcon" viewBox="0 0 24 24">
+        <path d="M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"/>
+      </svg>
+      <svg id="moonIcon" viewBox="0 0 24 24">
+        <path d="M21 12.79A9 9 0 0 1 11.21 3 7 7 0 1 0 21 12.79Z"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- 主內容 -->
+  <div class="main">
+    <!-- LLM 卡 -->
+    <div class="glass-base llm-card">
+      <div id="chat"></div>
+      <div class="composer">
+        <textarea id="query" placeholder="輸入你的問題..."></textarea>
+        <button class="send-btn" id="sendBtn" disabled>送出</button>
+      </div>
+    </div>
+
+    <!-- 右側：控制卡 + 影片卡 -->
+    <div class="right-col">
+      <!-- 控制卡 -->
+      <div class="glass-base control-card">
+        <div class="control-row">
+          <input id="file" type="file" accept="video/*" style="display:none;">
+          <!-- 這裡不再有上傳按鈕，只留 YOLO 分析 -->
+          <button class="btn btn-green" id="analyzeBtn" disabled>跑 YOLO 分析</button>
+          <div class="progress-bar-wrap" id="progressContainer">
+            <div class="progress-bar" id="progressBar"></div>
           </div>
+        </div>
+
+        <div id="status">請先上傳影片</div>
+
+        <div id="videoInfo"></div>
+
+        <div class="frame-sync">
+          <span style="opacity:.7;">同步微調：</span>
+          <button id="btnPrevFrame" class="sync-btn">-1 幀</button>
+          <span id="frameOffsetDisplay" style="min-width:26px;text-align:center;">0</span>
+          <button id="btnNextFrame" class="sync-btn">+1 幀</button>
         </div>
       </div>
 
-      <div class="right-panel">
-        <div class="video-wrapper">
+      <!-- 影片卡 -->
+      <div class="glass-base video-card">
+        <div class="video-wrapper" id="dropZone">
+          <div id="videoPlaceholder">
+            <img src="/static/update.svg" alt="上傳圖示">
+            <div>點擊新增或拖曳影片檔案到此區塊</div>
+            <button class="vp-upload-btn" id="videoUploadBtn">上傳影片</button>
+          </div>
+
           <video id="videoPlayer" controls></video>
           <canvas id="overlay"></canvas>
-        </div>
-        <div class="right-panel-bottom">
-          <div id="progressContainer">
-            <div id="progressBar"></div>
-          </div>
-          <span id="yoloStatus">尚未執行 YOLO 分析</span>
-          <div class="sync-controls">
-            <span style="font-size: 12px; color: #9ca3af;">同步微調:</span>
-            <button id="btnPrevFrame" class="sync-btn">-1 幀</button>
-            <span id="frameOffsetDisplay" style="min-width: 20px; text-align: center; font-family: monospace;">0</span>
-            <button id="btnNextFrame" class="sync-btn">+1 幀</button>
-          </div>
         </div>
       </div>
     </div>
   </div>
 
   <script>
+    /* ========= 主題切換 ========= */
+    const body = document.body;
+    document.getElementById("themeToggle").onclick = () => {
+      if (body.classList.contains("light")) {
+        body.classList.remove("light");
+        body.classList.add("dark");
+      } else {
+        body.classList.remove("dark");
+        body.classList.add("light");
+      }
+    };
+
+    /* ========= 共用 DOM ========= */
     const $ = (id) => document.getElementById(id);
     const chatEl = $("chat");
     const fileEl = $("file");
-    const uploadBtn = $("uploadBtn");
-    const uploadInfoEl = $("uploadInfo");
+    const videoUploadBtn = $("videoUploadBtn");
     const videoInfoEl = $("videoInfo");
     const queryEl = $("query");
     const sendBtn = $("sendBtn");
     const statusEl = $("status");
     const analyzeBtn = $("analyzeBtn");
-    const yoloStatusEl = $("yoloStatus");
     const videoEl = $("videoPlayer");
     const canvasEl = $("overlay");
     const ctx = canvasEl.getContext("2d");
-    const wrapperEl = document.querySelector(".video-wrapper");
+    const wrapperEl = document.getElementById("dropZone");
     const btnPrev = $("btnPrevFrame");
     const btnNext = $("btnNextFrame");
     const offsetDisplay = $("frameOffsetDisplay");
-    
-    // 進度條元件
     const progressContainer = $("progressContainer");
     const progressBar = $("progressBar");
+    const placeholderEl = $("videoPlaceholder");
 
-    const SKELETON_LINKS = [[5, 6], [5, 11], [6, 12], [11, 12], [5, 7], [7, 9], [6, 8], [8, 10], [11, 13], [13, 15], [12, 14], [14, 16]];
+    const SKELETON_LINKS = [
+      [5,6],[5,11],[6,12],[11,12],[5,7],[7,9],
+      [6,8],[8,10],[11,13],[13,15],[12,14],[14,16]
+    ];
 
     let sessionId = null;
     let videoMeta = null;
@@ -95,250 +130,429 @@
     let detectionReady = false;
     let frameOffset = 0;
     let rafId = null;
-    let pollInterval = null; // 輪詢計時器
+    let pollInterval = null;
+    let analysisCompleted = false;
 
-    function appendMessage(role, text, meta) {
-      const row = document.createElement("div"); row.className = `msg-row ${role}`;
-      const bubble = document.createElement("div"); bubble.className = `bubble ${role}`;
-      bubble.textContent = text; row.appendChild(bubble);
-      if (meta) { const m = document.createElement("div"); m.className = "meta-text"; m.textContent = meta; row.appendChild(m); }
-      chatEl.appendChild(row); chatEl.scrollTop = chatEl.scrollHeight;
+    /* ========== Chat 工具 ========== */
+    function appendMessage(role, text) {
+      const row = document.createElement("div");
+      row.className = `msg-row ${role}`;
+      const bubble = document.createElement("div");
+      bubble.className = `bubble ${role}`;
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      chatEl.appendChild(row);
+      chatEl.scrollTop = chatEl.scrollHeight;
+      return bubble;
     }
 
     function setBusy(isBusy) {
       sendBtn.disabled = isBusy || !sessionId;
-      uploadBtn.disabled = isBusy;
-      // 分析按鈕在忙碌時停用，除非是輪詢狀態 (後面處理)
-      analyzeBtn.disabled = isBusy || !sessionId;
-      statusEl.textContent = isBusy ? "處理中..." : sessionId ? "可以開始提問或執行 YOLO 分析" : "請先上傳影片";
+      // 上傳在分析完成後鎖死，這裡只在尚未完成時受 busy 影響
+      if (!analysisCompleted) {
+        videoUploadBtn.disabled = isBusy;
+      }
+      if (!analysisCompleted) {
+        analyzeBtn.disabled = isBusy || !sessionId;
+      }
+      if (!sessionId) {
+        statusEl.textContent = "請先上傳影片";
+      } else if (isBusy) {
+        statusEl.textContent = "處理中...";
+      }
+      // 如果不是 busy 且有其他訊息，就保持原本 status（不再顯示「可以開始提問」）
     }
 
+    /* ========== Canvas / Overlay ========== */
     function syncCanvasSize() {
-      if (!wrapperEl || !videoEl) return;
-      const vW = videoEl.videoWidth; const vH = videoEl.videoHeight;
-      if (!vW || !vH) return;
-      canvasEl.width = vW; canvasEl.height = vH;
-      const vRect = videoEl.getBoundingClientRect(); const wRect = wrapperEl.getBoundingClientRect();
-      const eRatio = vRect.width / vRect.height; const vRatio = vW / vH;
-      let dW = vRect.width, dH = vRect.height, offX = 0, offY = 0;
-      if (eRatio > vRatio) { dW = vRect.height * vRatio; offX = (vRect.width - dW) / 2; }
-      else { dH = vRect.width / vRatio; offY = (vRect.height - dH) / 2; }
-      canvasEl.style.width = `${dW}px`; canvasEl.style.height = `${dH}px`;
-      canvasEl.style.left = `${vRect.left + offX - wRect.left}px`; canvasEl.style.top = `${vRect.top + offY - wRect.top}px`;
+      if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+      canvasEl.width = videoEl.videoWidth;
+      canvasEl.height = videoEl.videoHeight;
       drawOverlay();
     }
 
-    window.addEventListener("resize", () => { syncCanvasSize(); });
-    videoEl.addEventListener("loadedmetadata", () => { syncCanvasSize(); });
-
-    btnPrev.onclick = () => { frameOffset--; offsetDisplay.textContent = frameOffset; drawOverlay(); };
-    btnNext.onclick = () => { frameOffset++; offsetDisplay.textContent = frameOffset; drawOverlay(); };
-
-    function startLoop() {
-      if (rafId) cancelAnimationFrame(rafId);
-      function loop() { if (!videoEl.paused && !videoEl.ended) { drawOverlay(); rafId = requestAnimationFrame(loop); } }
-      loop();
-    }
-    videoEl.addEventListener("play", startLoop);
-    videoEl.addEventListener("pause", () => { if (rafId) cancelAnimationFrame(rafId); drawOverlay(); });
-    videoEl.addEventListener("seeked", drawOverlay);
-
     function buildFrameMaps() {
-      tracksByFrame = {}; ballTracks.forEach((b) => { const f = b.frame; if (!tracksByFrame[f]) tracksByFrame[f] = []; tracksByFrame[f].push(b); });
-      posesByFrame = {}; poses.forEach((p) => { const f = p.frame; if (!posesByFrame[f]) posesByFrame[f] = []; posesByFrame[f].push(p); });
-    }
+      tracksByFrame = {};
+      ballTracks.forEach((b)=>{
+        const f = b.frame;
+        if (!tracksByFrame[f]) tracksByFrame[f] = [];
+        tracksByFrame[f].push(b);
+      });
 
-    function drawOverlay() {
-      ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-      if (!detectionReady || !videoEl.videoWidth) return;
-      const fps = (videoMeta && videoMeta.fps) || 30;
-      let frameIdx = Math.round(videoEl.currentTime * fps) + frameOffset;
-      if (frameIdx < 0) frameIdx = 0;
-      const boxes = tracksByFrame[frameIdx] || [];
-      const framePoses = posesByFrame[frameIdx] || [];
-      
-      ctx.lineWidth = 4; ctx.strokeStyle = "#facc15"; 
-      boxes.forEach((b) => { ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1); });
-
-      framePoses.forEach((p) => {
-        const kps = p.keypoints || []; if (!kps.length) return;
-        const pts = kps.map(([x, y, conf]) => ({ x, y, conf }));
-        ctx.fillStyle = "#22c55e";
-        pts.forEach((pt) => { if (pt.conf < 0.3) return; ctx.beginPath(); ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2); ctx.fill(); });
-        ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 4;
-        SKELETON_LINKS.forEach(([i, j]) => {
-          const a = pts[i]; const b = pts[j]; if (!a || !b) return; if (a.conf < 0.3 || b.conf < 0.3) return;
-          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-        });
+      posesByFrame = {};
+      poses.forEach((p)=>{
+        const f = p.frame;
+        if (!posesByFrame[f]) posesByFrame[f] = [];
+        posesByFrame[f].push(p);
       });
     }
 
-    uploadBtn.onclick = async () => {
-      const f = fileEl.files[0]; if (!f) { alert("請選擇影片檔"); return; }
-      setBusy(true); uploadInfoEl.textContent = "上傳中..."; videoInfoEl.textContent = "";
-      yoloStatusEl.textContent = "尚未執行 YOLO 分析";
-      detectionReady = false; ballTracks = []; poses = []; tracksByFrame = {}; posesByFrame = {}; frameOffset = 0; offsetDisplay.textContent = "0";
-      drawOverlay();
-      if (localVideoUrl) URL.revokeObjectURL(localVideoUrl);
-      localVideoUrl = URL.createObjectURL(f); videoEl.src = localVideoUrl;
+    function drawOverlay() {
+      const vw = videoEl.videoWidth;
+      const vh = videoEl.videoHeight;
+      const cw = wrapperEl.clientWidth;
+      const ch = wrapperEl.clientHeight;
 
-      try {
-        const fd = new FormData(); fd.append("file", f);
-        const res = await fetch("/upload", { method: "POST", body: fd });
-        const data = await res.json();
-        if (!data.ok) throw new Error(data.error || "上傳失敗");
-        sessionId = data.session_id; videoMeta = data.meta;
-        uploadInfoEl.textContent = "✅ 上傳完成";
-        sendBtn.disabled = false; analyzeBtn.disabled = false;
-        const m = data.meta || {};
-        const lines = [`檔名：${data.filename || "(未知)"}`, m.width ? `解析度：${m.width} x ${m.height}` : "", m.fps ? `FPS：${m.fps.toFixed(2)}` : "", m.duration ? `時長：${m.duration.toFixed(2)}s` : ""].filter(x=>x).join("\n");
-        videoInfoEl.textContent = lines;
-        appendMessage("assistant", "影片上傳完成！");
-      } catch (e) { console.error(e); uploadInfoEl.textContent = "❌ 上傳失敗"; alert("上傳失敗：" + e.message); sessionId = null; sendBtn.disabled = true; analyzeBtn.disabled = true; } finally { setBusy(false); }
+      ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      if (!detectionReady || !vw || !vh || !cw || !ch) return;
+
+      // 計算 object-fit: contain 實際顯示尺寸
+      const videoRatio = vw / vh;
+      const containerRatio = cw / ch;
+
+      let renderW, renderH;
+      if (videoRatio > containerRatio) {
+        renderW = cw;
+        renderH = cw / videoRatio;
+      } else {
+        renderH = ch;
+        renderW = ch * videoRatio;
+      }
+
+      const xOffset = (cw - renderW) / 2;
+      const yOffset = (ch - renderH) / 2;
+      const scale = renderW / vw;
+
+      ctx.save();
+      ctx.translate(xOffset, yOffset);
+      ctx.scale(scale, scale);
+
+      const fps = (videoMeta && videoMeta.fps) || 30;
+      let frameIdx = Math.round(videoEl.currentTime * fps) + frameOffset;
+      if (frameIdx < 0) frameIdx = 0;
+
+      const boxes = tracksByFrame[frameIdx] || [];
+      const framePoses = posesByFrame[frameIdx] || [];
+
+      ctx.lineWidth = 3 / scale;
+      ctx.strokeStyle = "#facc15";
+
+      boxes.forEach((b)=>{
+        ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+      });
+
+      framePoses.forEach((p)=>{
+        const kps = p.keypoints || [];
+        ctx.fillStyle = "#22c55e";
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = 3 / scale;
+
+        kps.forEach(([x,y,conf])=>{
+          if (conf < 0.3) return;
+          ctx.beginPath();
+          ctx.arc(x, y, 6 / scale, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        SKELETON_LINKS.forEach(([i,j])=>{
+          const a = kps[i];
+          const b = kps[j];
+          if (!a || !b) return;
+          if (a[2] < 0.3 || b[2] < 0.3) return;
+          ctx.beginPath();
+          ctx.moveTo(a[0], a[1]);
+          ctx.lineTo(b[0], b[1]);
+          ctx.stroke();
+        });
+      });
+
+      ctx.restore();
+    }
+
+    videoEl.addEventListener("loadedmetadata", syncCanvasSize);
+    window.addEventListener("resize", syncCanvasSize);
+
+    function startLoop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      function loop() {
+        if (!videoEl.paused && !videoEl.ended) {
+          drawOverlay();
+          rafId = requestAnimationFrame(loop);
+        }
+      }
+      loop();
+    }
+    videoEl.addEventListener("play", startLoop);
+    videoEl.addEventListener("pause", () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      drawOverlay();
+    });
+
+    /* ========== 上傳與拖曳 ========== */
+
+    function triggerFileSelect() {
+      if (analysisCompleted) return; // YOLO 結束後鎖死
+      fileEl.click();
+    }
+
+    videoUploadBtn.onclick = triggerFileSelect;
+    placeholderEl.onclick = triggerFileSelect;
+
+    fileEl.onchange = () => {
+      if (fileEl.files && fileEl.files[0]) {
+        handleUpload(fileEl.files[0]);
+      }
     };
 
-    // --- 修改：分析按鈕邏輯 (背景任務 + 輪詢) ---
-    analyzeBtn.onclick = async () => {
-      if (!sessionId) { alert("請先上傳影片"); return; }
-      
-      // UI 狀態切換
-      setBusy(true); // 鎖定其他按鈕
-      analyzeBtn.disabled = true; // 鎖定自己
-      yoloStatusEl.textContent = "準備開始分析...";
-      progressContainer.style.display = "block";
-      progressBar.style.width = "0%";
+    // 拖曳上傳
+    ["dragenter","dragover"].forEach(evtName => {
+      wrapperEl.addEventListener(evtName, (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        if (analysisCompleted) return;
+        wrapperEl.classList.add("drop-active");
+      });
+    });
+
+    ["dragleave","drop"].forEach(evtName => {
+      wrapperEl.addEventListener(evtName, (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        wrapperEl.classList.remove("drop-active");
+      });
+    });
+
+    wrapperEl.addEventListener("drop", (e)=>{
+      if (analysisCompleted) return;
+      const dt = e.dataTransfer;
+      if (!dt || !dt.files || !dt.files[0]) return;
+      handleUpload(dt.files[0]);
+    });
+
+    async function handleUpload(file) {
+      if (!file) return;
+      setBusy(true);
+      statusEl.textContent = "影片上傳中...";
 
       try {
-        // 1. 發送開始請求
+        if (localVideoUrl) URL.revokeObjectURL(localVideoUrl);
+        localVideoUrl = URL.createObjectURL(file);
+        videoEl.src = localVideoUrl;
+        placeholderEl.style.display = "none";
+        videoEl.style.display = "block";
+
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/upload", {
+          method: "POST",
+          body: fd
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "上傳失敗");
+
+        sessionId = data.session_id;
+        videoMeta = data.meta;
+        detectionReady = false;
+        ballTracks = [];
+        poses = [];
+        tracksByFrame = {};
+        posesByFrame = {};
+        frameOffset = 0;
+        offsetDisplay.textContent = "0";
+
+        analyzeBtn.disabled = false;
+        sendBtn.disabled = false;
+
+        const m = data.meta;
+        videoInfoEl.textContent =
+          `檔名：${data.filename}\n` +
+          `解析度：${m.width} x ${m.height}\n` +
+          `FPS：${m.fps}\n` +
+          `時長：${m.duration.toFixed(2)}s`;
+
+        statusEl.textContent = "影片上傳完成";
+        appendMessage("assistant", "影片上傳完成！");
+      } catch (err) {
+        alert("上傳失敗：" + err.message);
+        statusEl.textContent = "上傳失敗，請重試";
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    /* ========== YOLO 分析 ========== */
+    analyzeBtn.onclick = async () => {
+      if (!sessionId) {
+        alert("請先上傳影片");
+        return;
+      }
+      if (analysisCompleted) return;
+
+      setBusy(true);
+      analyzeBtn.disabled = true;
+      progressContainer.style.display = "block";
+      progressBar.style.width = "0%";
+      statusEl.textContent = "準備開始分析...";
+
+      try {
         const res = await fetch("/analyze_yolo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, max_frames: 1000 }),
+          body: JSON.stringify({ session_id: sessionId, max_frames: 1000 })
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.detail || "啟動失敗");
 
-        // 2. 開始輪詢進度
-        yoloStatusEl.textContent = "YOLO 分析進行中 (0%)...";
-        
         pollInterval = setInterval(async () => {
           try {
-            const statusRes = await fetch(`/analyze_status/${sessionId}`);
-            const statusData = await statusRes.json();
-            
-            // 更新進度條
-            const pct = statusData.progress || 0;
-            progressBar.style.width = `${pct}%`;
-            yoloStatusEl.textContent = `YOLO 分析進行中 (${pct}%)...`;
+            const s = await fetch(`/analyze_status/${sessionId}`);
+            const st = await s.json();
 
-            if (statusData.status === "completed") {
+            const pct = st.progress || 0;
+            progressBar.style.width = pct + "%";
+            statusEl.textContent = `YOLO 分析中 (${pct}%)`;
+
+            if (st.status === "completed") {
               clearInterval(pollInterval);
-              // 完成，載入數據
-              ballTracks = statusData.ball_tracks || [];
-              poses = statusData.poses || [];
+              pollInterval = null;
+
+              ballTracks = st.ball_tracks || [];
+              poses = st.poses || [];
               detectionReady = true;
+
               buildFrameMaps();
               syncCanvasSize();
-              
-              yoloStatusEl.textContent = `✅ 分析完成：球軌跡 ${ballTracks.length}，姿態 ${poses.length}。`;
-              progressContainer.style.display = "none";
-              setBusy(false);
-            } else if (statusData.status === "failed") {
-              clearInterval(pollInterval);
-              yoloStatusEl.textContent = `❌ 分析失敗：${statusData.error}`;
-              progressContainer.style.display = "none";
-              setBusy(false);
-              alert("分析失敗：" + statusData.error);
-            }
-          } catch (err) {
-            console.error("輪詢錯誤", err);
-          }
-        }, 1000); // 每秒檢查一次
 
-      } catch (e) {
-        console.error(e);
-        yoloStatusEl.textContent = "啟動分析失敗：" + e.message;
+              statusEl.textContent = `分析完成：球軌跡 ${ballTracks.length}、姿態 ${poses.length}`;
+              progressContainer.style.display = "none";
+
+              // 分析完成後前端鎖死：不可再重新上傳或分析
+              analysisCompleted = true;
+              analyzeBtn.disabled = true;
+              videoUploadBtn.disabled = true;
+              btnPrev.disabled = false;
+              btnNext.disabled = false;
+              // drag & drop 透過 analysisCompleted flag 自然失效
+
+              setBusy(false);
+            } else if (st.status === "failed") {
+              clearInterval(pollInterval);
+              pollInterval = null;
+              statusEl.textContent = "YOLO 分析失敗";
+              progressContainer.style.display = "none";
+              alert("分析失敗：" + (st.error || "未知錯誤"));
+              setBusy(false);
+            }
+          } catch (e) {
+            console.error("輪詢錯誤", e);
+          }
+        }, 900);
+
+      } catch (err) {
         progressContainer.style.display = "none";
+        statusEl.textContent = "啟動分析失敗";
+        alert("啟動分析失敗：" + err.message);
         setBusy(false);
       }
     };
 
+    // 同步微調
+    btnPrev.onclick = () => {
+      frameOffset--;
+      offsetDisplay.textContent = frameOffset;
+      drawOverlay();
+    };
+    btnNext.onclick = () => {
+      frameOffset++;
+      offsetDisplay.textContent = frameOffset;
+      drawOverlay();
+    };
+
+    /* ========== LLM 聊天，含「思考中...」動畫 ========== */
+    sendBtn.onclick = sendQuestion;
+    queryEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendQuestion();
+      }
+    });
+
+    let thinkingTimer = null;
+
+    function startThinking(bubble) {
+      let dots = 1;
+      bubble.textContent = "思考中.";
+      thinkingTimer = setInterval(() => {
+        dots = (dots % 3) + 1;
+        bubble.textContent = "思考中" + ".".repeat(dots);
+      }, 500);
+    }
+
+    function stopThinking() {
+      if (thinkingTimer) {
+        clearInterval(thinkingTimer);
+        thinkingTimer = null;
+      }
+    }
+
     async function sendQuestion() {
-    if (!sessionId) { alert("請先上傳影片"); return; }
-    const text = queryEl.value.trim();
-    if (!text) { alert("請輸入問題"); return; }
-
-    // 使用者訊息先畫出來
-    appendMessage("user", text);
-    queryEl.value = "";
-
-    // 建立空的 assistant 泡泡，等等一路更新內容
-    const row = document.createElement("div");
-    row.className = "msg-row assistant";
-    const bubble = document.createElement("div");
-    bubble.className = "bubble assistant";
-    bubble.textContent = ""; // 先空字串
-    row.appendChild(bubble);
-    chatEl.appendChild(row);
-    chatEl.scrollTop = chatEl.scrollHeight;
-
-    setBusy(true);
-
-    try {
-      const res = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, question: text }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        bubble.textContent = "錯誤：" + (errText || res.statusText);
+      if (!sessionId) {
+        alert("請先上傳影片");
         return;
       }
+      const text = queryEl.value.trim();
+      if (!text) return;
 
-      // 串流讀取
-      const reader = res.body?.getReader();
-      if (!reader) {
-        // 環境不支援串流，退而求其次整包讀
-        const fallbackText = await res.text();
-        bubble.textContent = fallbackText || "(空)";
-        return;
-      }
+      appendMessage("user", text);
+      queryEl.value = "";
 
-      const decoder = new TextDecoder("utf-8");
-      let done = false;
-      let fullText = "";
+      const thinkingBubble = appendMessage("assistant", "");
+      startThinking(thinkingBubble);
 
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
-        if (value) {
-          const chunkText = decoder.decode(value, { stream: !done });
-          if (chunkText) {
-            fullText += chunkText;
-            bubble.textContent = fullText;
+      setBusy(true);
+
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, question: text })
+        });
+
+        if (!res.ok || !res.body) {
+          stopThinking();
+          thinkingBubble.textContent = "錯誤：" + (await res.text() || res.statusText);
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let full = "";
+        let gotChunk = false;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            if (!gotChunk) {
+              gotChunk = true;
+              stopThinking();
+              thinkingBubble.textContent = "";
+            }
+            const chunkText = decoder.decode(value, { stream: true });
+            full += chunkText;
+            thinkingBubble.textContent = full;
             chatEl.scrollTop = chatEl.scrollHeight;
           }
         }
+
+        if (!gotChunk) {
+          // 沒有任何串流內容
+          stopThinking();
+          thinkingBubble.textContent = "(無回應內容)";
+        }
+
+      } catch (err) {
+        stopThinking();
+        thinkingBubble.textContent = "連線失敗：" + err.message;
+      } finally {
+        setBusy(false);
       }
-    } catch (e) {
-      console.error(e);
-      bubble.textContent = "連線失敗：" + e.message;
-    } finally {
-      setBusy(false);
     }
-  }
 
-  sendBtn.onclick = sendQuestion;
-  queryEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendQuestion();
-    }
-  });
-
-  setBusy(false);
-</script>
+    // 初始狀態
+    setBusy(false);
+    btnPrev.disabled = true;
+    btnNext.disabled = true;
+  </script>
 </body>
 </html>
