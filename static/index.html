@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-Hant" class="light">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -18,19 +19,19 @@
       網球比賽分析助手
     </div>
     <button id="themeToggle" class="glass-base theme-toggle">
-    <div class="ts-track">
-      <div class="ts-sky ts-sky-day"></div>
-      <div class="ts-sky ts-sky-night"></div>
+      <div class="ts-track">
+        <div class="ts-sky ts-sky-day"></div>
+        <div class="ts-sky ts-sky-night"></div>
 
-      <div class="ts-stars"></div>
-      <div class="ts-clouds ts-clouds-front"></div>
-      <div class="ts-clouds ts-clouds-back"></div>
-    </div>
+        <div class="ts-stars"></div>
+        <div class="ts-clouds ts-clouds-front"></div>
+        <div class="ts-clouds ts-clouds-back"></div>
+      </div>
 
-    <div class="ts-orb">
-      <div class="ts-orb-inner"></div>
-    </div>
-  </button>
+      <div class="ts-orb">
+        <div class="ts-orb-inner"></div>
+      </div>
+    </button>
   </header>
 
   <!-- 主內容 -->
@@ -50,7 +51,6 @@
       <div class="glass-base control-card">
         <div class="control-row">
           <input id="file" type="file" accept="video/*" style="display:none;">
-          <!-- 這裡不再有上傳按鈕，只留 YOLO 分析 -->
           <button class="btn btn-green" id="analyzeBtn" disabled>跑 YOLO 分析</button>
           <div class="progress-bar-wrap" id="progressContainer">
             <div class="progress-bar" id="progressBar"></div>
@@ -75,9 +75,8 @@
           <div id="videoPlaceholder">
             <img src="/static/update.svg" alt="上傳圖示">
             <div>點擊新增或拖曳影片檔案到此區塊</div>
-            <button class="vp-upload-btn" id="videoUploadBtn">上傳影片</button>
+            <button id="videoUploadBtn"></button>
           </div>
-
           <video id="videoPlayer" controls></video>
           <canvas id="overlay"></canvas>
         </div>
@@ -120,8 +119,8 @@
     const placeholderEl = $("videoPlaceholder");
 
     const SKELETON_LINKS = [
-      [5,6],[5,11],[6,12],[11,12],[5,7],[7,9],
-      [6,8],[8,10],[11,13],[13,15],[12,14],[14,16]
+      [5, 6], [5, 11], [6, 12], [11, 12], [5, 7], [7, 9],
+      [6, 8], [8, 10], [11, 13], [13, 15], [12, 14], [14, 16]
     ];
 
     let sessionId = null;
@@ -177,14 +176,14 @@
 
     function buildFrameMaps() {
       tracksByFrame = {};
-      ballTracks.forEach((b)=>{
+      ballTracks.forEach((b) => {
         const f = b.frame;
         if (!tracksByFrame[f]) tracksByFrame[f] = [];
         tracksByFrame[f].push(b);
       });
 
       posesByFrame = {};
-      poses.forEach((p)=>{
+      poses.forEach((p) => {
         const f = p.frame;
         if (!posesByFrame[f]) posesByFrame[f] = [];
         posesByFrame[f].push(p);
@@ -231,24 +230,24 @@
       ctx.lineWidth = 3 / scale;
       ctx.strokeStyle = "#facc15";
 
-      boxes.forEach((b)=>{
+      boxes.forEach((b) => {
         ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
       });
 
-      framePoses.forEach((p)=>{
+      framePoses.forEach((p) => {
         const kps = p.keypoints || [];
         ctx.fillStyle = "#22c55e";
         ctx.strokeStyle = "#22c55e";
         ctx.lineWidth = 3 / scale;
 
-        kps.forEach(([x,y,conf])=>{
+        kps.forEach(([x, y, conf]) => {
           if (conf < 0.3) return;
           ctx.beginPath();
           ctx.arc(x, y, 6 / scale, 0, Math.PI * 2);
           ctx.fill();
         });
 
-        SKELETON_LINKS.forEach(([i,j])=>{
+        SKELETON_LINKS.forEach(([i, j]) => {
           const a = kps[i];
           const b = kps[j];
           if (!a || !b) return;
@@ -299,8 +298,8 @@
     };
 
     // 拖曳上傳
-    ["dragenter","dragover"].forEach(evtName => {
-      wrapperEl.addEventListener(evtName, (e)=>{
+    ["dragenter", "dragover"].forEach(evtName => {
+      wrapperEl.addEventListener(evtName, (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (analysisCompleted) return;
@@ -308,15 +307,15 @@
       });
     });
 
-    ["dragleave","drop"].forEach(evtName => {
-      wrapperEl.addEventListener(evtName, (e)=>{
+    ["dragleave", "drop"].forEach(evtName => {
+      wrapperEl.addEventListener(evtName, (e) => {
         e.preventDefault();
         e.stopPropagation();
         wrapperEl.classList.remove("drop-active");
       });
     });
 
-    wrapperEl.addEventListener("drop", (e)=>{
+    wrapperEl.addEventListener("drop", (e) => {
       if (analysisCompleted) return;
       const dt = e.dataTransfer;
       if (!dt || !dt.files || !dt.files[0]) return;
@@ -559,4 +558,5 @@
     btnNext.disabled = true;
   </script>
 </body>
+
 </html>
