@@ -136,6 +136,15 @@
     let pollInterval = null;
     let analysisCompleted = false;
 
+    let autoScroll = true; // 是否自動捲到底
+
+    chatEl.addEventListener("scroll", () => {
+      const threshold = 40; // 距離底部多少 px 以內算「在底部」
+      const distanceToBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight;
+      autoScroll = distanceToBottom <= threshold;
+    });
+
+
     /* ========== Chat 工具 ========== */
     function appendMessage(role, text) {
       const row = document.createElement("div");
@@ -145,9 +154,13 @@
       bubble.textContent = text;
       row.appendChild(bubble);
       chatEl.appendChild(row);
-      chatEl.scrollTop = chatEl.scrollHeight;
+      // 只有在使用者本來就在底部時才自動捲到底
+      if (autoScroll) {
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
       return bubble;
     }
+
 
     function setBusy(isBusy) {
       sendBtn.disabled = isBusy || !sessionId;
@@ -534,7 +547,9 @@
             const chunkText = decoder.decode(value, { stream: true });
             full += chunkText;
             thinkingBubble.textContent = full;
-            chatEl.scrollTop = chatEl.scrollHeight;
+            if (autoScroll) {
+              chatEl.scrollTop = chatEl.scrollHeight;
+            }
           }
         }
 
