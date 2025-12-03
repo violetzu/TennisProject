@@ -9,7 +9,7 @@
   <!-- 字體 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap">
-  <link rel="stylesheet" href="static/index.css?v=005" />
+  <link rel="stylesheet" href="static/index.css?v=13" />
 </head>
 
 <body class="light">
@@ -51,7 +51,7 @@
       <div class="glass-base control-card">
         <div class="control-row">
           <input id="file" type="file" accept="video/*" style="display:none;">
-          <button class="btn btn-green" id="analyzeBtn" disabled>跑 YOLO 分析</button>
+          <button class="btn btn-green" id="analyzeBtn" disabled>YOLO 分析</button>
           <div class="progress-bar-wrap" id="progressContainer">
             <div class="progress-bar" id="progressBar"></div>
           </div>
@@ -73,9 +73,9 @@
       <div class="glass-base video-card">
         <div class="video-wrapper" id="dropZone">
           <div id="videoPlaceholder">
-            <img src="/static/update.svg" alt="上傳圖示">
+            <img src="/static/update.svg" id="uploadIcon" alt="上傳圖示">
             <div>點擊新增或拖曳影片檔案到此區塊</div>
-            <button id="videoUploadBtn"></button>
+            <button class="vp-upload-btn" id="videoUploadBtn"></button>
           </div>
           <video id="videoPlayer" controls></video>
           <canvas id="overlay"></canvas>
