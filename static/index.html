@@ -26,20 +26,7 @@
     <div class="glass-base header-chip">
       網球比賽分析助手
     </div>
-    <button id="themeToggle" class="glass-base theme-toggle">
-      <div class="ts-track">
-        <div class="ts-sky ts-sky-day"></div>
-        <div class="ts-sky ts-sky-night"></div>
-
-        <div class="ts-stars"></div>
-        <div class="ts-clouds ts-clouds-front"></div>
-        <div class="ts-clouds ts-clouds-back"></div>
-      </div>
-
-      <div class="ts-orb">
-        <div class="ts-orb-inner"></div>
-      </div>
-    </button>
+    <theme-toggle></theme-toggle>
   </header>
 
   <!-- 主內容 -->
@@ -84,25 +71,12 @@
       </div>
     </div>
   </div>
-
+  <script type="module" src="static/theme-toggle.js"></script>
   <script type="module">
     // 超簡單防快取：每次重新整理都拿到一組新版本號 
     // true = 防快取 / false = 不防快取
     const DevelopmentMode = true;
     // const DevelopmentMode = false;
-
-    
-    /* ========= 主題切換 ========= */
-    const body = document.body;
-    document.getElementById("themeToggle").onclick = () => {
-      if (body.classList.contains("light")) {
-        body.classList.remove("light");
-        body.classList.add("dark");
-      } else {
-        body.classList.remove("dark");
-        body.classList.add("light");
-      }
-    };
 
     const state = {
       sessionId: null,
