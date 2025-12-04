@@ -15,6 +15,7 @@ python-multipart
 opencv-python
 pillow
 ultralytics
+lap
 ollama
 supervision
 python-dotenv
