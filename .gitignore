@@ -1,5 +1,8 @@
 __pycache__/
 *.mp4
+*.avi
+*.mov
+*.mkv
 *.png
 *.pt
 *.cbm
