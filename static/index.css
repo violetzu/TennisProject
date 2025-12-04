@@ -494,32 +494,6 @@ body.dark .bubble.assistant {
   white-space: pre-line;
 }
 
-.frame-sync {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: flex-end;
-  font-size: 12px;
-}
-
-.sync-btn {
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: none;
-  background: rgba(15, 23, 42, 0.85);
-  color: #e5e7eb;
-  cursor: pointer;
-  font-size: 12px;
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.5);
-}
-
-.sync-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
 /* 影片卡 */
 .video-card {
   flex: 1;

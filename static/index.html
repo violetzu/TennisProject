@@ -8,8 +8,8 @@
 
   <!-- 字體 -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap">
-  <link rel="stylesheet" href="static/index.css?v=13" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Traditional+Chinese:wght@300;400;500;700&display=swap">
+  <link rel="stylesheet" href="static/index.css?v=14" />
 </head>
 
 <body class="light">
@@ -52,6 +52,7 @@
         <div class="control-row">
           <input id="file" type="file" accept="video/*" style="display:none;">
           <button class="btn btn-green" id="analyzeBtn" disabled>YOLO 分析</button>
+          <button class="btn" id="resetBtn">重置</button>
           <div class="progress-bar-wrap" id="progressContainer">
             <div class="progress-bar" id="progressBar"></div>
           </div>
@@ -60,15 +61,7 @@
         <div id="status">請先上傳影片</div>
 
         <div id="videoInfo"></div>
-
-        <div class="frame-sync">
-          <span style="opacity:.7;">同步微調：</span>
-          <button id="btnPrevFrame" class="sync-btn">-1 幀</button>
-          <span id="frameOffsetDisplay" style="min-width:26px;text-align:center;">0</span>
-          <button id="btnNextFrame" class="sync-btn">+1 幀</button>
-        </div>
       </div>
-
       <!-- 影片卡 -->
       <div class="glass-base video-card">
         <div class="video-wrapper" id="dropZone">
@@ -111,9 +104,7 @@
     const canvasEl = $("overlay");
     const ctx = canvasEl.getContext("2d");
     const wrapperEl = document.getElementById("dropZone");
-    const btnPrev = $("btnPrevFrame");
-    const btnNext = $("btnNextFrame");
-    const offsetDisplay = $("frameOffsetDisplay");
+    const resetBtn = $("resetBtn");
     const progressContainer = $("progressContainer");
     const progressBar = $("progressBar");
     const placeholderEl = $("videoPlaceholder");
@@ -364,7 +355,6 @@
         tracksByFrame = {};
         posesByFrame = {};
         frameOffset = 0;
-        offsetDisplay.textContent = "0";
 
         analyzeBtn.disabled = false;
         sendBtn.disabled = false;
@@ -385,6 +375,11 @@
         setBusy(false);
       }
     }
+
+    // 重置按鈕：清空影片並重整頁面
+    resetBtn.onclick = () => {
+      window.location.reload();
+    };
 
     /* ========== YOLO 分析 ========== */
     analyzeBtn.onclick = async () => {
@@ -436,8 +431,6 @@
               analysisCompleted = true;
               analyzeBtn.disabled = true;
               videoUploadBtn.disabled = true;
-              btnPrev.disabled = false;
-              btnNext.disabled = false;
               // drag & drop 透過 analysisCompleted flag 自然失效
 
               setBusy(false);
@@ -460,18 +453,6 @@
         alert("啟動分析失敗：" + err.message);
         setBusy(false);
       }
-    };
-
-    // 同步微調
-    btnPrev.onclick = () => {
-      frameOffset--;
-      offsetDisplay.textContent = frameOffset;
-      drawOverlay();
-    };
-    btnNext.onclick = () => {
-      frameOffset++;
-      offsetDisplay.textContent = frameOffset;
-      drawOverlay();
     };
 
     /* ========== LLM 聊天，含「思考中...」動畫 ========== */
@@ -569,8 +550,6 @@
 
     // 初始狀態
     setBusy(false);
-    btnPrev.disabled = true;
-    btnNext.disabled = true;
   </script>
 </body>
 
