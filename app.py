@@ -16,9 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
-from src_llm.analyze_video_with_yolo import analyze_video_with_yolo
 from src_llm import *
-
 # 載入環境變數
 load_dotenv()
 
@@ -39,13 +37,6 @@ except ImportError:
 BASE_DIR = Path(__file__).parent
 VIDEO_DIR = BASE_DIR / "videos"
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-
-# 模型路徑設定 (可透過環境變數覆寫)
-
-
-# 全域變數存放載入後的模型
-BALL_MODEL = None
-POSE_MODEL = None
 
 # 多模態模型 API 設定
 QWEN_VL_URL = "http://qwen3vl:2333/chat-vl"
@@ -101,6 +92,10 @@ async def lifespan(app: FastAPI):
 # 初始化 FastAPI
 app = FastAPI(title="Tennis Video Backend", lifespan=lifespan)
 
+app.state.session_store = SESSION_STORE
+app.state.qwen_vl_url = QWEN_VL_URL
+app.state.api_key = API_KEY
+
 # 掛載靜態檔案目錄，讓前端可以透過 URL 存取影片
 app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -114,6 +109,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(chat_router)
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
@@ -202,98 +199,7 @@ async def upload_video(file: UploadFile = File(...)):
         "yolo_video_url": yolo_url, "raw_video_url": f"/videos/{vid}{ext}"
     }
 
-class ChatRequest(BaseModel):
-    session_id: str
-    question: str
 
-@app.post("/chat")
-async def chat(req: ChatRequest):
-    """
-    與 LLM (Qwen-VL) 對話的 API。
-    改成串流模式：後端轉發 chat-vl2 的文字流，前端即時顯示。
-    """
-    sess = SESSION_STORE.get(req.session_id)
-    if not sess:
-        raise HTTPException(400, "無效 session")
-    
-    sys_prompt = "你是網球分析助手。"
-    p_path = Path("tennis_prompt.txt") 
-    if p_path.exists():
-        with open(p_path, "r", encoding="utf-8") as f:
-            sys_prompt = f.read().strip()
-
-    history = sess["history"]
-    # 組合 Prompt 上下文
-    parts = [f"影片: {sess['filename']}"]
-    if sess["ball_tracks"]:
-        parts.append("(已有 YOLO 分析數據)")
-    if history:
-        parts.append("歷史對話:")
-        for h in history[-10:]:
-            parts.append(f"Q:{h['user']} A:{h['assistant']}")
-    parts.append(f"新問題: {req.question}")
-    user_txt = "\n".join(parts)
-
-    # 構建多模態訊息格式
-    msgs = [
-        {"role": "system", "content": [{"type": "text", "text": sys_prompt}]},
-        {"role": "user", "content": [
-            {"type": "video", "video_url": "video"},
-            {"type": "text", "text": user_txt}
-        ]}
-    ]
-
-    if not os.path.exists(sess["video_path"]):
-        raise HTTPException(500, "找不到影片檔")
-
-    def token_generator():
-        """
-        同步 generator：
-        1. 呼叫 QWEN_VL_URL (chat-vl2) 開啟 HTTP 串流
-        2. 一邊 yield chunk 給前端
-        3. 同時累積完整回答，最後寫入 history
-        """
-        answer_chunks = []
-        try:
-            with open(sess["video_path"], "rb") as vf:
-                resp = requests.post(
-                    QWEN_VL_URL,
-                    headers={"X-API-Key": API_KEY} if API_KEY else {},
-                    files={"file": (sess["filename"], vf, "video/mp4")},
-                    data={"messages": json.dumps(msgs), "max_new_tokens": "2048", "stream": "true"},
-                    timeout=600,
-                    stream=True,  # 關鍵：開啟 HTTP 串流
-                )
-            
-            if not resp.ok:
-                err_text = f"[API Error {resp.status_code}: {resp.text}]"
-                yield err_text
-                return
-
-            # iter_content 會隨著對方 chunk 傳過來
-            for chunk in resp.iter_content(chunk_size=128, decode_unicode=True):
-                if not chunk:
-                    continue
-                answer_chunks.append(chunk)
-                yield chunk
-
-        except Exception as e:
-            err_text = f"[Error: {str(e)}]"
-            yield err_text
-        finally:
-            # 串流結束後把完整回答存進 session history
-            if answer_chunks:
-                full_ans = "".join(answer_chunks)
-                sess["history"].append({
-                    "user": req.question,
-                    "assistant": full_ans
-                })
-
-    # 回傳純文字串流
-    return StreamingResponse(
-        token_generator(),
-        media_type="text/plain; charset=utf-8"
-    )
 
 class AnalyzeRequest(BaseModel):
     session_id: str
