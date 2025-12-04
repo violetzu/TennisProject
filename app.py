@@ -48,7 +48,7 @@ BALL_MODEL = None
 POSE_MODEL = None
 
 # 多模態模型 API 設定
-QWEN_VL_URL = "http://qwen3vl:2333/chat-vl2"
+QWEN_VL_URL = "http://qwen3vl:2333/chat-vl"
 API_KEY = os.getenv("API_KEY", None)
 
 # SESSION 儲存區：存放分析狀態、進度與結果
@@ -260,7 +260,7 @@ async def chat(req: ChatRequest):
                     QWEN_VL_URL,
                     headers={"X-API-Key": API_KEY} if API_KEY else {},
                     files={"file": (sess["filename"], vf, "video/mp4")},
-                    data={"messages": json.dumps(msgs), "max_new_tokens": "2048"},
+                    data={"messages": json.dumps(msgs), "max_new_tokens": "2048", "stream": "true"},
                     timeout=600,
                     stream=True,  # 關鍵：開啟 HTTP 串流
                 )
