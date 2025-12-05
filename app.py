@@ -1,33 +1,27 @@
 # main.py
 import os
 import uuid
-import json
 import time
 import asyncio
-import shutil
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Optional, Dict, List
+from typing import Dict, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
-import requests
 from dotenv import load_dotenv
-from src_llm import *
-# 載入環境變數
+
+from src_llm import chat_router, yolo_router
+
 load_dotenv()
 
-# --- 設定區 ---
-# 影片保留時間 (秒)，超過則清除
-MAX_AGE_SECONDS = 3600 
-# 清除任務檢查間隔 (秒)
-CHECK_INTERVAL_SECONDS = 600
-# -------------
+# ========= 設定 =========
+MAX_AGE_SECONDS = 3600         # 影片保留時間
+CHECK_INTERVAL_SECONDS = 600   # 清理檢查間隔
 
-# 嘗試匯入電腦視覺庫，若環境未安裝則設為 None (避免直接 Crash)
 try:
     import cv2
 except ImportError:
@@ -71,7 +65,6 @@ async def cleanup_loop():
         except asyncio.CancelledError:
             break
         except Exception:
-            # 發生未預期錯誤時，等待一分鐘後重試，避免死迴圈佔用 CPU
             await asyncio.sleep(60)
 
 @asynccontextmanager
@@ -96,7 +89,7 @@ app.state.session_store = SESSION_STORE
 app.state.qwen_vl_url = QWEN_VL_URL
 app.state.api_key = API_KEY
 
-# 掛載靜態檔案目錄，讓前端可以透過 URL 存取影片
+# 靜態檔案
 app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -111,6 +104,8 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(yolo_router)
+
 
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
@@ -137,128 +132,61 @@ def get_video_meta(path: str) -> Dict:
     cap.release()
     return meta
 
-def generate_yolo_annotated_video(input_path: str) -> str:
-    """
-    [同步任務] 生成帶有骨架繪製的影片。
-    這是一個較耗時的操作，目前是在上傳後直接執行 (可能會卡住請求，建議未來也可改為背景執行)。
-    """
-    ball_model, pose_model = get_yolo_models()
-    video_name = Path(input_path).name
-    # 使用 YOLO 的 save_vid=True 功能直接輸出繪圖後的影片
-    pose_model(
-        source=input_path, save=True, save_vid=True,
-        project=str(VIDEO_DIR), name="yolo_annotated", exist_ok=True,
-    )
-    out_path = VIDEO_DIR / "yolo_annotated" / video_name
-    if not out_path.exists():
-        raise RuntimeError(f"找不到標註後影片：{out_path}")
-    return str(out_path)
-
 @app.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
     """
-    影片上傳 API
-    1. 儲存原始影片
-    2. 生成 Session ID
-    3. 執行 YOLO 視覺化 (同步)
-    4. 回傳影片 URL 與 Session 資訊
+    上傳只做兩件事：
+    1. 儲存影片到後端
+    2. 建立 session_id 方便之後分析用
+
+    前端預覽用自己的 blob，不用跟後端拿原始影片 URL
     """
-    if not file.filename: raise HTTPException(400, "無檔名")
+    if not file.filename:
+        raise HTTPException(400, "無檔名")
     fn = file.filename
     ext = os.path.splitext(fn)[1].lower()
-    if ext not in {".mp4", ".mov", ".avi", ".mkv"}: raise HTTPException(400, "格式錯誤")
+    if ext not in {".mp4", ".mov", ".avi", ".mkv"}:
+        raise HTTPException(400, "格式錯誤")
 
     sid = uuid.uuid4().hex
     vid = uuid.uuid4().hex
     vpath = VIDEO_DIR / f"{vid}{ext}"
 
     content = await file.read()
-    with open(vpath, "wb") as f: f.write(content)
+    with open(vpath, "wb") as f:
+        f.write(content)
 
     meta = get_video_meta(str(vpath))
-    
-    # 初始化 session 狀態
+
     SESSION_STORE[sid] = {
         "video_path": str(vpath), "filename": fn, "meta": meta,
         "history": [], "ball_tracks": None, "poses": None,
-        "status": "idle", "progress": 0, "error": None
+        "status": "idle", "progress": 0, "error": None,
+        "yolo_video_url": None,  # 新增
     }
-
-    yolo_url = f"/videos/{vid}{ext}"
-    try:
-        # 產生視覺化預覽影片
-        annotated = generate_yolo_annotated_video(str(vpath))
-        rel = os.path.relpath(annotated, VIDEO_DIR)
-        yolo_url = f"/videos/{rel.replace(os.sep, '/')}"
-    except Exception:
-        pass
 
     return {
-        "ok": True, "session_id": sid, "video_id": vid,
-        "filename": fn, "meta": meta,
-        "yolo_video_url": yolo_url, "raw_video_url": f"/videos/{vid}{ext}"
+        "ok": True,
+        "session_id": sid,
+        "video_id": vid,
+        "filename": fn,
+        "meta": meta,
+                "yolo_video_url": None,             
+        "raw_video_url": f"/videos/{vid}{ext}" 
     }
 
 
 
-class AnalyzeRequest(BaseModel):
-    session_id: str
-    max_frames: Optional[int] = 300
-    
-@app.post("/analyze_yolo")
-async def analyze_yolo_api(req: AnalyzeRequest, background_tasks: BackgroundTasks):
-    """
-    啟動詳細分析的 API。
-    使用 FastAPI 的 BackgroundTasks 將耗時運算 (run_yolo_background) 丟到背景執行，
-    API 本身會立即回應 "Analysis started"。
-    """
-    sess = SESSION_STORE.get(req.session_id)
-    if not sess: raise HTTPException(400, "無效 session")
-    
-    if sess.get("status") == "processing":
-        return {"ok": True, "message": "Already processing"}
+@app.get("/status/{session_id}")
+async def get_status(session_id: str, request: Request):
+    session_store: Dict[str, Dict] = request.app.state.session_store
+    sess = session_store.get(session_id)
+    if not sess:
+        raise HTTPException(404, "無效 session_id")
 
-    sess["status"] = "processing"
-    sess["progress"] = 0
-    sess["error"] = None
-    
-    # 將任務加入背景排程
-    background_tasks.add_task(run_yolo_background, req.session_id, req.max_frames or 300)
-    
-    return {"ok": True, "message": "Analysis started"}
-
-@app.get("/analyze_status/{session_id}")
-async def get_analyze_status(session_id: str):
-    """前端輪詢 (Polling) 用，檢查背景分析任務的進度與結果"""
-    sess = SESSION_STORE.get(session_id)
-    if not sess: raise HTTPException(404, "Session not found")
-    
     return {
         "status": sess.get("status", "idle"),
-        "progress": sess.get("progress", 0),
-        "ball_tracks": sess.get("ball_tracks"),
-        "poses": sess.get("poses"),
-        "error": sess.get("error")
+        "progress": int(sess.get("progress", 0) or 0),
+        "error": sess.get("error"),
+        "yolo_video_url": sess.get("yolo_video_url"),
     }
-
-def run_yolo_background(session_id: str, max_frames: int):
-    """
-    [背景任務] 實際執行耗時的 YOLO 分析邏輯。
-    負責更新 SESSION_STORE 中的狀態。
-    """
-    sess = SESSION_STORE.get(session_id)
-    if not sess: return
-    
-    try:
-        # 呼叫核心分析函式
-        res = analyze_video_with_yolo(sess["video_path"], max_frames, sess)
-        
-        sess["ball_tracks"] = res["ball_tracks"]
-        sess["poses"] = res["poses"]
-        sess["status"] = "completed"
-        sess["progress"] = 100
-    except Exception as e:
-        sess["status"] = "failed"
-        sess["error"] = str(e)
-        print(f"YOLO Processing Error: {e}")
-

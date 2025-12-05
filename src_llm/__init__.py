@@ -1,2 +1,2 @@
-from .analyze_video_with_yolo import analyze_video_with_yolo
-from .get_yolo_models import get_yolo_models
+from .chat import router as chat_router
+from .analyze_yolo import router as yolo_router
