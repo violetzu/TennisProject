@@ -1,91 +1,17 @@
-# src_llm.py
-from typing import Dict, Optional, Callable
+import cv2
+from typing import Callable, Dict, Optional
 from pathlib import Path
 import subprocess
-import asyncio
-
-import cv2
 import numpy as np
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
 
-from fastapi.responses import FileResponse  # 如果你別處有用到可以留著
-from .get_yolo_models import get_yolo_models
-
-
-router = APIRouter()
-
-class AnalyzeRequest(BaseModel):
-    session_id: str
-    max_frames: Optional[int] = 300
-
-
-@router.post("/analyze_yolo")
-async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
-    """
-    現在這個 API 不會直接回影片，
-    而是啟動「背景分析任務」，馬上回傳 ok=true，
-    分析進度與結果由 /status 取得。
-    """
-    session_store: Dict[str, Dict] = request.app.state.session_store
-    sess = session_store.get(req.session_id)
-    if not sess:
-        raise HTTPException(400, "無效 session_id")
-
-    video_path = sess["video_path"]
-    max_frames = req.max_frames or 300
-
-    # 標記開始分析
-    sess["status"] = "processing"
-    sess["progress"] = 0
-    sess["error"] = None
-    sess["yolo_video_url"] = None
-
-    # 進度 callback（會在背景執行緒裡被呼叫）
-    def progress_cb(done: int, total: int):
-        if total <= 0:
-            return
-        pct = int(done * 100 / total)
-        # 未完成前最多到 99%
-        sess["progress"] = min(pct, 99)
-
-    async def runner():
-        try:
-            # 把重的同步工作丟到 thread 裡跑，避免阻塞 event loop
-            out_path = await asyncio.to_thread(
-                analyze_video_with_yolo,
-                video_path,
-                max_frames,
-                progress_cb,
-            )
-
-            p = Path(out_path)
-            if not p.exists():
-                sess["status"] = "failed"
-                sess["error"] = "分析完成但找不到輸出影片"
-                sess["progress"] = 0
-                return
-
-            sess["status"] = "completed"
-            sess["progress"] = 100
-            # 靜態目錄 /videos 已經 mount 到 VIDEO_DIR，所以只要給檔名就能播
-            sess["yolo_video_url"] = f"/videos/{p.name}"
-        except Exception as e:
-            sess["status"] = "failed"
-            sess["error"] = str(e)
-            sess["progress"] = 0
-
-    # 啟動背景任務，不等待
-    asyncio.create_task(runner())
-
-    # 立刻回應，讓前端可以開始輪詢 /status
-    return {"ok": True}
-
+from .utils import get_video_meta
 
 def analyze_video_with_yolo(
     video_path: str,
     max_frames: int = 300,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    ball_model=None,
+    pose_model=None,
 ) -> str:
     """
     YOLO 分析 + 繪圖（同步函式，會在背景執行緒裡跑）
@@ -95,16 +21,13 @@ def analyze_video_with_yolo(
     - 每幀畫好後以 raw BGR pipe 給 ffmpeg 壓 mp4
     - progress_callback(done, total) 用來回報進度
     """
-    ball_model, pose_model = get_yolo_models()
-
     # --- 影片基本資訊 ---
-    cap0 = cv2.VideoCapture(video_path)
-    if not cap0.isOpened():
+    meta = get_video_meta(video_path)
+    if not meta["fps"]:
         raise RuntimeError(f"無法開啟影片：{video_path}")
-    fps = cap0.get(cv2.CAP_PROP_FPS) or 30.0
-    width = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap0.release()
+
+    fps = meta["fps"]
+    width, height = meta["width"], meta["height"]
 
     src_path = Path(video_path)
     out_name = src_path.stem + "_yolo.mp4"
