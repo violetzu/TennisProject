@@ -6,6 +6,9 @@ import os
 import json
 import requests
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+REMOVE_CHARS = ",\"-#'"
+
 router = APIRouter()
 
 class ChatRequest(BaseModel):
@@ -28,7 +31,7 @@ async def chat(req: ChatRequest, request: Request):
         raise HTTPException(400, "無效 session")
     
     sys_prompt = "你是網球分析助手。"
-    p_path = Path("tennis_prompt.txt") 
+    p_path = Path( BASE_DIR / "tennis_prompt.txt") 
     if p_path.exists():
         with open(p_path, "r", encoding="utf-8") as f:
             sys_prompt = f.read().strip()
@@ -85,8 +88,9 @@ async def chat(req: ChatRequest, request: Request):
             for chunk in resp.iter_content(chunk_size=128, decode_unicode=True):
                 if not chunk:
                     continue
-                answer_chunks.append(chunk)
-                yield chunk
+                clean_chunk = chunk.translate(str.maketrans("", "", REMOVE_CHARS))
+                answer_chunks.append(clean_chunk)
+                yield clean_chunk
 
         except Exception as e:
             err_text = f"[Error: {str(e)}]"
