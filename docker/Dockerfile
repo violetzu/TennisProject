@@ -11,6 +11,7 @@ RUN apt-get update && \
         libxext6 \
         libxrender1 \
         libgl1 \
+        ffmpeg \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
