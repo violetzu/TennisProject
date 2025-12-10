@@ -1,4 +1,5 @@
 import cv2
+import os
 from typing import Callable, Dict, Optional
 from pathlib import Path
 import subprocess
@@ -8,7 +9,7 @@ from .utils import get_video_meta
 
 def analyze_video_with_yolo(
     video_path: str,
-    max_frames: int = 300,
+    max_frames: Optional[int] = 128000,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     ball_model=None,
     pose_model=None,
