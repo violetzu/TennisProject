@@ -20,7 +20,8 @@ analyze_yolo = APIRouter()
 
 class AnalyzeRequest(BaseModel):
     session_id: str
-    max_frames: Optional[int] = 300
+    max_frames: Optional[int] = None
+    max_seconds: Optional[float] = None
 
 
 @upload.post("/upload")
@@ -40,22 +41,22 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
     if ext not in {".mp4", ".mov", ".avi", ".mkv"}:
         raise HTTPException(400, "格式錯誤")
 
-    # 需要在 main.py 先設定：
-    # app.state.video_dir = Path("你實際存放影片的資料夾")
-    # app.state.session_store = {}
-    try:
-        video_dir: Path = request.app.state.video_dir  # 這裡修正 typo：原本是 viseo_dir
-    except AttributeError:
-        raise HTTPException(500, "伺服器未設定 video_dir")
+    video_dir: Path = request.app.state.video_dir  
 
     sid = uuid.uuid4().hex
     vid = uuid.uuid4().hex
     vpath = video_dir / f"{vid}{ext}"
 
-    # 儲存上傳影片
-    content = await file.read()
-    with open(vpath, "wb") as f:
-        f.write(content)
+    # 儲存上傳影片（分塊寫入，避免一次把整個檔案讀到記憶體）
+    try:
+        with open(vpath, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception as e:
+        raise HTTPException(500, f"儲存檔案失敗：{e}")
 
     # 讀取影片基本資訊（長度、fps 之類的，取決於你 get_video_meta 的實作）
     meta = get_video_meta(str(vpath))
@@ -82,9 +83,6 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         "filename": fn,
         "meta": meta,
         "yolo_video_url": None,
-        # 靜態目錄 /videos 已經 mount 到實體 VIDEO_DIR
-        # 前端直接用這個 URL 播原始影片
-        "raw_video_url": f"/videos/{vid}{ext}",
     }
 
 
@@ -100,7 +98,33 @@ async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
         raise HTTPException(400, "無效 session_id")
 
     video_path = sess["video_path"]
-    max_frames = req.max_frames or 300
+    # 先從影片 meta 取得 fps 與總幀數
+    meta = sess.get("meta") or get_video_meta(video_path)
+    fps = meta.get("fps") or 30.0
+    total_frames = meta.get("frame_count") or 0
+
+    # 決定要處理的幀數：優先使用 max_frames，其次 max_seconds，最後整段影片
+    if req.max_frames is not None:
+        max_frames = max(0, int(req.max_frames))
+    elif req.max_seconds is not None:
+        max_frames = max(0, int(req.max_seconds * fps))
+    else:
+        max_frames = total_frames or 300
+
+    # 上限保護：app.state > env(VIDEO_MAX_FRAMES_CAP) > 預設 120000
+    DEFAULT_CAP = 120_000
+    raw_cap = getattr(
+        request.app.state,
+        "video_max_frames_cap",
+        os.getenv("VIDEO_MAX_FRAMES_CAP", DEFAULT_CAP),
+    )
+    try:
+        cap = int(raw_cap)
+    except Exception:
+        cap = DEFAULT_CAP
+
+    if cap > 0:
+        max_frames = min(max_frames, cap)
 
     # 標記開始分析
     sess["status"] = "processing"
