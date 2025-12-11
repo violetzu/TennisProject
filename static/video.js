@@ -189,13 +189,22 @@ export function initVideo({ state, dom, utils }) {
         setProgress(0);
 
         try {
+            // 組 payload：若有影片長度資訊，預設傳 max_seconds 給後端；否則不帶限制（後端會用 meta 或上限保護）
+            const payload = { session_id: state.sessionId };
+            try {
+                const dur = state.videoMeta && state.videoMeta.duration;
+                if (dur && typeof dur === 'number' && isFinite(dur) && dur > 0) {
+                    // 傳整數秒（向上取整）以避免漏掉最後一段時間
+                    payload.max_seconds = Math.ceil(dur);
+                }
+            } catch (e) {
+                // ignore, 交給後端決定
+            }
+
             const res = await fetch("/analyze_yolo", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    session_id: state.sessionId,
-                    max_frames: 1000
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!res.ok) {
