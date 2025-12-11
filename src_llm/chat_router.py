@@ -7,7 +7,7 @@ import json
 import requests
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-REMOVE_CHARS = ",\"-#'"
+REMOVE_CHARS = "*#"
 
 router = APIRouter()
 
@@ -38,7 +38,7 @@ async def chat(req: ChatRequest, request: Request):
 
     history = sess["history"]
     # 組合 Prompt 上下文
-    parts = [f"影片: {sess['filename']}"]
+    parts = []
     if sess["ball_tracks"]:
         parts.append("(已有 YOLO 分析數據)")
     if history:
@@ -63,7 +63,7 @@ async def chat(req: ChatRequest, request: Request):
     def token_generator():
         """
         同步 generator：
-        1. 呼叫 QWEN_VL_URL (chat-vl2) 開啟 HTTP 串流
+        1. 呼叫 QWEN_VL_URL (chat-vl) 開啟 HTTP 串流
         2. 一邊 yield chunk 給前端
         3. 同時累積完整回答，最後寫入 history
         """
@@ -75,7 +75,6 @@ async def chat(req: ChatRequest, request: Request):
                     headers={"X-API-Key": api_key} if api_key else {},
                     files={"file": (sess["filename"], vf, "video/mp4")},
                     data={"messages": json.dumps(msgs), "max_new_tokens": "2048", "stream": "true"},
-                    timeout=600,
                     stream=True,  # 關鍵：開啟 HTTP 串流
                 )
             
