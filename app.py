@@ -31,6 +31,7 @@ app.state.session_store = SESSION_STORE
 app.state.qwen_vl_url = QWEN_VL_URL
 app.state.api_key = API_KEY
 app.state.video_dir = VIDEO_DIR
+app.state.video_max_frames_cap = 120000
 
 # 靜態檔案
 app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
@@ -59,3 +60,8 @@ def serve_index():
     if not index_path.exists():
         return HTMLResponse("<h1>找不到 index.html</h1>", status_code=404)
     return FileResponse(index_path)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse("static/favicon.ico")
