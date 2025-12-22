@@ -21,7 +21,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+COPY model/ball/yolov8_ball_09250900_best.pt ./model/ball/yolov8_ball_09250900_best.pt
+COPY model/person/yolo11n-pose.pt ./model/person/yolo11n-pose.pt
+COPY src_llm/ ./src_llm/
+COPY static/ ./static/
+COPY app.py .
 
-
-#COPY . .
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
