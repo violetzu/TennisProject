@@ -16,7 +16,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent
 
 # 多模態模型 API 設定
-QWEN_VL_URL = "http://qwen3vl:2333/chat-vl"
+QWEN_VL_URL = os.getenv("QWEN_VL_URL")
 API_KEY = os.getenv("API_KEY", None)
 
 # SESSION 儲存區：存放分析狀態、進度與結果
