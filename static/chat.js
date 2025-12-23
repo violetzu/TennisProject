@@ -1,7 +1,7 @@
 // static/chat.js
 
 export function initChat({ state, dom, utils }) {
-  const { appendMessage, showError, setBusy } = utils;
+  const { appendMessage, showError } = utils;
 
   let thinkingTimer = null;
 
@@ -21,6 +21,11 @@ export function initChat({ state, dom, utils }) {
     }
   }
 
+  function setChatBusy(isBusy) {
+    dom.sendBtn.disabled = isBusy || !state.sessionId;
+    dom.queryEl.disabled = isBusy;
+  }
+
   async function sendQuestion() {
     if (!state.sessionId) {
       showError("請先上傳影片再提問");
@@ -35,7 +40,7 @@ export function initChat({ state, dom, utils }) {
 
     const thinkingBubble = appendMessage("assistant", "");
     startThinking(thinkingBubble);
-    setBusy(true);
+    setChatBusy(true);
 
     try {
       const res = await fetch("/chat", {
@@ -83,7 +88,7 @@ export function initChat({ state, dom, utils }) {
       stopThinking();
       thinkingBubble.textContent = "連線失敗：" + err.message;
     } finally {
-      setBusy(false);
+      setChatBusy(false);
     }
   }
 
@@ -95,4 +100,5 @@ export function initChat({ state, dom, utils }) {
       sendQuestion();
     }
   });
+  setChatBusy(false);
 }
