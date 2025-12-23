@@ -1,4 +1,5 @@
 from ultralytics import YOLO
+import torch
 from pathlib import Path
 import os 
 import cv2
@@ -6,16 +7,26 @@ import subprocess
 import json
 from typing import Dict
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+from .config import BASE_DIR
+
 BALL_MODEL_PATH = Path(os.getenv("BALL_MODEL_PATH", BASE_DIR / "model/ball/yolov8_ball_09250900_best.pt"))
 POSE_MODEL_PATH = Path(os.getenv("POSE_MODEL_PATH", BASE_DIR / "model/person/yolo11n-pose.pt"))
 
 
-def get_yolo_models(device="cuda:0") -> tuple[YOLO, YOLO]:
+def get_yolo_models(device: str | None = None) -> tuple[YOLO, YOLO]:
     if not BALL_MODEL_PATH.exists():
         raise FileNotFoundError(f"找不到球偵測模型檔案：{BALL_MODEL_PATH}")
     if not POSE_MODEL_PATH.exists():
         raise FileNotFoundError(f"找不到姿態模型檔案：{POSE_MODEL_PATH}")
+
+    if device is None:
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    if device.startswith("cuda") and torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"[YOLO] 使用 GPU：{gpu_name}")
+    else:
+        print("[YOLO] 使用 CPU 推論")
 
     ball_model = YOLO(str(BALL_MODEL_PATH)).to(device)
     pose_model = YOLO(str(POSE_MODEL_PATH)).to(device)

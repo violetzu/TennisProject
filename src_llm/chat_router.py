@@ -6,7 +6,8 @@ import os
 import json
 import requests
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+from .config import BASE_DIR
+
 REMOVE_CHARS = "*#"
 
 router = APIRouter()

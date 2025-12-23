@@ -6,14 +6,14 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from .utils import get_yolo_models
-
+from .config import BASE_DIR 
 
 # ========= 設定 =========
-MAX_AGE_SECONDS = 3600         # 影片保留時間
+CHUNK_MAX_AGE_SECONDS = 60 * 60        # 1 小時，超過代表上傳已死
+VIDEO_MAX_AGE_SECONDS = 24 * 60 * 60   # 1 天，正式影片保留時間
 CHECK_INTERVAL_SECONDS = 600   # 清理檢查間隔
 
 # 路徑設定（假設專案結構是：project/main.py、project/videos、project/src_llm/...）
-BASE_DIR = Path(__file__).resolve().parent.parent
 VIDEO_DIR = BASE_DIR / "videos"
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -26,25 +26,40 @@ async def cleanup_loop() -> None:
     while True:
         try:
             await asyncio.sleep(CHECK_INTERVAL_SECONDS)
-            current_time = time.time()
-            if VIDEO_DIR.exists():
-                for file_path in VIDEO_DIR.rglob("*"):
-                    if file_path.is_file():
-                        try:
-                            # 檢查檔案修改時間
-                            file_age = current_time - file_path.stat().st_mtime
-                            if file_age > MAX_AGE_SECONDS:
-                                file_path.unlink()  # 刪除檔案
-                        except Exception:
-                            # 單一檔案失敗不影響整體迴圈
-                            pass
+            now = time.time()
+
+            # ---------- 1. 清理 chunks ----------
+            chunks_root = VIDEO_DIR / "_chunks"
+            if chunks_root.exists():
+                for upload_dir in chunks_root.iterdir():
+                    if not upload_dir.is_dir():
+                        continue
+                    try:
+                        # 用資料夾最後修改時間判斷整個 upload
+                        age = now - upload_dir.stat().st_mtime
+                        if age > CHUNK_MAX_AGE_SECONDS:
+                            shutil.rmtree(upload_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+
+            # ---------- 2. 清理正式影片 ----------
+            for video_file in VIDEO_DIR.iterdir():
+                if not video_file.is_file():
+                    continue
+                if video_file.suffix.lower() not in {".mp4", ".mov", ".avi", ".mkv"}:
+                    continue
+
+                try:
+                    age = now - video_file.stat().st_mtime
+                    if age > VIDEO_MAX_AGE_SECONDS:
+                        video_file.unlink()
+                except Exception:
+                    pass
+
         except asyncio.CancelledError:
-            # 被取消時結束迴圈
             break
         except Exception:
-            # 不預期錯誤：暫停一段時間再繼續
             await asyncio.sleep(60)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:

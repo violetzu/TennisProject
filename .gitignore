@@ -12,5 +12,6 @@ llm_server/
 common/
 tests/
 model/
+videos/
 *.env
 

@@ -1,4 +1,5 @@
-from .lifespan import lifespan, VIDEO_DIR
+from .lifespan import lifespan
+from .config import VIDEO_DIR
 from .chat_router import router as chat_router
 from .video_router import upload as upload_router
 from .video_router import analyze_yolo as yolo_router

@@ -11,9 +11,6 @@ from pydantic import BaseModel
 from .analyze_video_with_yolo import analyze_video_with_yolo
 from .utils import get_video_meta
 
-# 專案根目錄
-BASE_DIR = Path(__file__).resolve().parents[1]
-
 # 三個 router
 status = APIRouter()
 upload = APIRouter()
@@ -151,61 +148,6 @@ async def upload_complete(request: Request, payload: Dict):
             pass
 
     return {"ok": True, "session_id": sid, "video_id": vid, "filename": filename, "meta": meta, "yolo_video_url": None}
-
-# -------------------------
-# (可選) 保留原本單次 /upload
-# 方便你測短影片用
-# -------------------------
-@upload.post("/upload")
-async def upload_video(request: Request, file: UploadFile = File(...)):
-    if not file.filename:
-        raise HTTPException(400, "無檔名")
-
-    fn = file.filename
-    ext = os.path.splitext(fn)[1].lower()
-    if ext not in {".mp4", ".mov", ".avi", ".mkv"}:
-        raise HTTPException(400, "格式錯誤")
-
-    video_dir: Path = request.app.state.video_dir
-
-    sid = uuid.uuid4().hex
-    vid = uuid.uuid4().hex
-    vpath = video_dir / f"{vid}{ext}"
-
-    try:
-        with open(vpath, "wb") as f:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-    except Exception as e:
-        raise HTTPException(500, f"儲存檔案失敗：{e}")
-
-    meta = get_video_meta(str(vpath))
-
-    session_store: Dict[str, Dict] = request.app.state.session_store
-    session_store[sid] = {
-        "video_path": str(vpath),
-        "filename": fn,
-        "meta": meta,
-        "history": [],
-        "ball_tracks": None,
-        "poses": None,
-        "status": "idle",
-        "progress": 0,
-        "error": None,
-        "yolo_video_url": None,
-    }
-
-    return {
-        "ok": True,
-        "session_id": sid,
-        "video_id": vid,
-        "filename": fn,
-        "meta": meta,
-        "yolo_video_url": None,
-    }
 
 
 # -------------------------
