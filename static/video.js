@@ -5,27 +5,27 @@ export function initVideo({ state, dom, utils }) {
 
   // ------- 時間換算工具 -------
   function formatDuration(seconds) {
-  if (
-    seconds == null ||
-    typeof seconds !== "number" ||
-    !isFinite(seconds) ||
-    seconds <= 0
-  ) {
-    return null;
-  }
+    if (
+      seconds == null ||
+      typeof seconds !== "number" ||
+      !isFinite(seconds) ||
+      seconds <= 0
+    ) {
+      return null;
+    }
 
-  const total = Math.floor(seconds);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
+    const total = Math.floor(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
 
-  if (h > 0) {
-    return `${h}時${m}分${s}秒`;
-  }
-  if (m > 0) {
-    return `${m}分${s}秒`;
-  }
-  return `${s}秒`;
+    if (h > 0) {
+      return `${h}時${m}分${s}秒`;
+    }
+    if (m > 0) {
+      return `${m}分${s}秒`;
+    }
+    return `${s}秒`;
   }
 
   // ------- 進度條工具 -------
@@ -66,7 +66,7 @@ export function initVideo({ state, dom, utils }) {
           reject(
             new Error(
               xhr.responseText ||
-                `chunk ${index} 上傳失敗（HTTP ${xhr.status}）`
+              `chunk ${index} 上傳失敗（HTTP ${xhr.status}）`
             )
           );
         }
@@ -156,13 +156,84 @@ export function initVideo({ state, dom, utils }) {
   }
 
   // ------- /status 輪詢 -------
+  // ------- 404 過多視為伺服器失效：彈窗問要不要重整 -------
+
+  // 可調參數
+  const STATUS_404_THRESHOLD = 6;     // 連續 404 幾次算掛掉
+  const STATUS_WINDOW_MS = 15_000;    // 或者在這個時間窗內累積（這裡用連續為主）
+  const ALERT_COOLDOWN_MS = 30_000;   // 彈窗後至少等多久才可能再彈
+
+  // 記錄狀態
+  state.status404Count = 0;
+  state.status404FirstAt = 0;
+  state.serverDownAlertAt = 0;
+  state.serverDownAlerting = false;
+
+  function maybeAlertServerDown(reasonText = "伺服器似乎失效（狀態查詢多次 404）。") {
+    const now = Date.now();
+
+    // 避免重複彈窗
+    if (state.serverDownAlerting) return;
+    if (state.serverDownAlertAt && now - state.serverDownAlertAt < ALERT_COOLDOWN_MS) return;
+
+    state.serverDownAlerting = true;
+    state.serverDownAlertAt = now;
+
+    // 停掉輪詢，避免繼續打爆
+    if (state.pollInterval) {
+      clearInterval(state.pollInterval);
+      state.pollInterval = null;
+    }
+
+    setBusy(false);
+    setProgress(0);
+    dom.statusEl.textContent = "伺服器連線異常（/status 404）";
+
+    const ok = window.confirm(`${reasonText}\n\n要重整頁面再試一次嗎？`);
+    state.serverDownAlerting = false;
+
+    if (ok) {
+      window.location.reload();
+    }
+  }
+
 
   async function fetchStatusOnce() {
     if (!state.sessionId) return;
 
     try {
       const res = await fetch(`/status/${state.sessionId}`);
+
+      // --- 針對 404 做保護 ---
+      if (res.status === 404) {
+        const now = Date.now();
+
+        // 初始化時間窗
+        if (!state.status404FirstAt) state.status404FirstAt = now;
+
+        // 超過時間窗就重算（避免很久以前的 404 影響現在）
+        if (now - state.status404FirstAt > STATUS_WINDOW_MS) {
+          state.status404FirstAt = now;
+          state.status404Count = 0;
+        }
+
+        state.status404Count += 1;
+
+        // 你也可以顯示一下目前連續 404 次數（選用）
+        dom.statusEl.textContent = `伺服器狀態查詢異常（404）... (${state.status404Count}/${STATUS_404_THRESHOLD})`;
+
+        if (state.status404Count >= STATUS_404_THRESHOLD) {
+          maybeAlertServerDown();
+        }
+        return; // 404 就先不往下走
+      }
+
+      // 非 404，代表狀態路由有回應 → 清掉 404 計數
+      state.status404Count = 0;
+      state.status404FirstAt = 0;
+
       if (!res.ok) return;
+
       const data = await res.json();
 
       const p = data.progress ?? 0;
@@ -199,7 +270,7 @@ export function initVideo({ state, dom, utils }) {
             dom.videoEl.src = data.yolo_video_url;
             dom.videoEl.style.display = "block";
             dom.placeholderEl.style.display = "none";
-            dom.videoEl.play().catch(() => {});
+            dom.videoEl.play().catch(() => { });
           }
 
           dom.statusEl.textContent = "分析完成（後端已畫好標註）";
@@ -230,6 +301,7 @@ export function initVideo({ state, dom, utils }) {
       console.error("查詢狀態失敗", e);
     }
   }
+
 
   function startStatusPolling() {
     if (!state.sessionId) return;
@@ -336,7 +408,7 @@ export function initVideo({ state, dom, utils }) {
         if (dur && typeof dur === "number" && isFinite(dur) && dur > 0) {
           payload.max_seconds = Math.ceil(dur);
         }
-      } catch (e) {}
+      } catch (e) { }
 
       const res = await fetch("/analyze_yolo", {
         method: "POST",
