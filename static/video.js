@@ -1,7 +1,32 @@
-// static/video.js － 使用背景任務 + 輪詢進度條 + 完成後變下載按鈕 + 上傳進度
+// static/video.js － Chunk Upload（可併發）+ 平滑上傳進度 + 背景任務 + 輪詢進度條 + 完成後變下載按鈕
 
 export function initVideo({ state, dom, utils }) {
   const { appendMessage, showError, showInfo, setBusy } = utils;
+
+  // ------- 時間換算工具 -------
+  function formatDuration(seconds) {
+  if (
+    seconds == null ||
+    typeof seconds !== "number" ||
+    !isFinite(seconds) ||
+    seconds <= 0
+  ) {
+    return null;
+  }
+
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+
+  if (h > 0) {
+    return `${h}時${m}分${s}秒`;
+  }
+  if (m > 0) {
+    return `${m}分${s}秒`;
+  }
+  return `${s}秒`;
+  }
 
   // ------- 進度條工具 -------
 
@@ -16,38 +41,125 @@ export function initVideo({ state, dom, utils }) {
     }
   }
 
-  // ------- 上傳（帶進度）工具 -------
+  // ------- XHR 上傳單一 chunk（有 upload progress） -------
 
-  function uploadFileWithProgress(url, formData, onProgress) {
+  function uploadChunkXHR({ uploadId, index, totalChunks, blob, onProgress }) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      const url =
+        `/upload_chunk?upload_id=${encodeURIComponent(uploadId)}` +
+        `&index=${index}&total=${totalChunks}`;
+
       xhr.open("POST", url, true);
 
       xhr.upload.onprogress = (evt) => {
-        if (!evt.lengthComputable) return;
-        const pct = Math.round((evt.loaded / evt.total) * 100);
-        onProgress?.(pct);
+        // 某些情況 lengthComputable 會 false；用 blob.size 當 total 也能算得很準
+        const total = evt.lengthComputable ? evt.total : blob.size;
+        const loaded = evt.loaded || 0;
+        onProgress?.(Math.min(loaded, total), total);
       };
 
       xhr.onload = () => {
-        try {
-          const data = JSON.parse(xhr.responseText || "{}");
-          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-          else reject(new Error(data.error || xhr.responseText || "上傳失敗"));
-        } catch (e) {
-          reject(new Error(xhr.responseText || "上傳失敗（非 JSON 回應）"));
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(true);
+        } else {
+          reject(
+            new Error(
+              xhr.responseText ||
+                `chunk ${index} 上傳失敗（HTTP ${xhr.status}）`
+            )
+          );
         }
       };
 
-      xhr.onerror = () => reject(new Error("網路錯誤，上傳失敗"));
-      xhr.send(formData);
+      xhr.onerror = () => reject(new Error(`chunk ${index} 網路錯誤`));
+
+      const fd = new FormData();
+      fd.append("chunk", blob);
+      xhr.send(fd);
     });
+  }
+
+  // ------- Chunk Upload（併發 + 平滑總進度） -------
+
+  async function uploadInChunksSmooth(
+    file,
+    { concurrency = 3, chunkSize = 10 * 1024 * 1024 } = {},
+    onProgress
+  ) {
+    const totalSize = file.size;
+    const totalChunks = Math.ceil(totalSize / chunkSize);
+
+    const uploadId =
+      crypto && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}_${Math.random()}`;
+
+    // 每塊目前已上傳 bytes（用來算總進度）
+    const uploadedByChunk = new Array(totalChunks).fill(0);
+
+    function reportProgress() {
+      const uploadedTotal = uploadedByChunk.reduce((a, b) => a + b, 0);
+      const pct = Math.round((uploadedTotal / totalSize) * 100);
+      onProgress?.(pct);
+    }
+
+    // 建立每個 chunk 的上傳任務
+    const tasks = Array.from({ length: totalChunks }, (_, index) => {
+      const start = index * chunkSize;
+      const end = Math.min(totalSize, start + chunkSize);
+      const blob = file.slice(start, end);
+
+      return async () => {
+        await uploadChunkXHR({
+          uploadId,
+          index,
+          totalChunks,
+          blob,
+          onProgress: (loaded) => {
+            uploadedByChunk[index] = Math.min(loaded, blob.size);
+            reportProgress();
+          },
+        });
+
+        // 完成時保底設滿
+        uploadedByChunk[index] = blob.size;
+        reportProgress();
+      };
+    });
+
+    // 併發 worker pool
+    let cursor = 0;
+    async function worker() {
+      while (cursor < tasks.length) {
+        const i = cursor++;
+        await tasks[i]();
+      }
+    }
+
+    const n = Math.max(1, Math.min(concurrency, tasks.length));
+    await Promise.all(Array.from({ length: n }, () => worker()));
+
+    // 上傳完成 → 通知後端合併 + 建立 session
+    const completeRes = await fetch("/upload_complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ upload_id: uploadId, filename: file.name }),
+    });
+
+    if (!completeRes.ok) {
+      const text = await completeRes.text().catch(() => "");
+      throw new Error(text || `完成上傳失敗（HTTP ${completeRes.status}）`);
+    }
+
+    return await completeRes.json();
   }
 
   // ------- /status 輪詢 -------
 
   async function fetchStatusOnce() {
     if (!state.sessionId) return;
+
     try {
       const res = await fetch(`/status/${state.sessionId}`);
       if (!res.ok) return;
@@ -87,7 +199,7 @@ export function initVideo({ state, dom, utils }) {
             dom.videoEl.src = data.yolo_video_url;
             dom.videoEl.style.display = "block";
             dom.placeholderEl.style.display = "none";
-            dom.videoEl.play();
+            dom.videoEl.play().catch(() => {});
           }
 
           dom.statusEl.textContent = "分析完成（後端已畫好標註）";
@@ -158,27 +270,36 @@ export function initVideo({ state, dom, utils }) {
       dom.videoEl.style.display = "block";
       dom.placeholderEl.style.display = "none";
 
-      // (2) 上傳給後端（帶進度）
-      const fd = new FormData();
-      fd.append("file", file);
+      // (2) Chunk Upload（併發 + 平滑進度）
+      // 你可以調整 concurrency / chunkSize
+      const data = await uploadInChunksSmooth(
+        file,
+        { concurrency: 3, chunkSize: 10 * 1024 * 1024 },
+        (pct) => {
+          setProgress(pct);
+          dom.statusEl.textContent = `影片上傳中... ${pct}%`;
+        }
+      );
 
-      const data = await uploadFileWithProgress("/upload", fd, (pct) => {
-        setProgress(pct);
-        dom.statusEl.textContent = `影片上傳中... ${pct}%`;
-      });
-
-      if (!data.ok) throw new Error(data.error || "上傳失敗");
+      if (!data || !data.ok) throw new Error(data?.error || "上傳失敗");
 
       state.sessionId = data.session_id;
       state.videoMeta = data.meta;
       state.filename = data.filename;
 
-      const m = data.meta;
-      dom.videoInfoEl.textContent =
-        `檔名：${data.filename}\n` +
-        `解析度：${m.width} x ${m.height}\n` +
-        `FPS：${m.fps}\n` +
-        `時長：${m.duration?.toFixed(2)}`;
+      const m = data.meta || {};
+      const lines = [];
+      lines.push(`檔名：${data.filename}`);
+      lines.push(`解析度：${m.width ?? "?"} x ${m.height ?? "?"}`);
+      lines.push(`FPS：${m.fps ?? "?"}`);
+
+      const durationText = formatDuration(m.duration);
+      if (durationText) {
+        lines.push(`時長：${durationText}`);
+      }
+
+      dom.videoInfoEl.textContent = lines.join("\n");
+
 
       setProgress(100);
       dom.statusEl.textContent = "影片上傳完成，可預覽或開始 YOLO 分析";
@@ -189,7 +310,7 @@ export function initVideo({ state, dom, utils }) {
       // 上傳完成後稍微停一下再收起進度條
       setTimeout(() => setProgress(0), 800);
     } catch (err) {
-      showError("上傳失敗：" + err.message);
+      showError("上傳失敗：" + (err?.message || String(err)));
       setProgress(0);
     } finally {
       setBusy(false);
@@ -235,7 +356,7 @@ export function initVideo({ state, dom, utils }) {
       startStatusPolling();
       // 不要 setBusy(false)，等 completed/failed 再解鎖
     } catch (err) {
-      showError("YOLO 分析啟動失敗：" + err.message);
+      showError("YOLO 分析啟動失敗：" + (err?.message || String(err)));
       setProgress(0);
       setBusy(false);
     }

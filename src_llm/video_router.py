@@ -3,6 +3,8 @@ from pathlib import Path
 import asyncio
 import os
 import uuid
+import shutil
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from pydantic import BaseModel
 
@@ -12,7 +14,7 @@ from .utils import get_video_meta
 # 專案根目錄
 BASE_DIR = Path(__file__).resolve().parents[1]
 
-# 建三個 router，給 main.py include_router 用
+# 三個 router
 status = APIRouter()
 upload = APIRouter()
 analyze_yolo = APIRouter()
@@ -24,15 +26,138 @@ class AnalyzeRequest(BaseModel):
     max_seconds: Optional[float] = None
 
 
+# -------------------------
+# Chunk Upload: 收單一 chunk
+# POST /upload_chunk?upload_id=...&index=0&total=123
+# form-data: chunk=<blob>
+# -------------------------
+@upload.post("/upload_chunk")
+async def upload_chunk(
+    request: Request,
+    upload_id: str,
+    index: int,
+    total: int,
+    chunk: UploadFile = File(...),
+):
+    video_dir: Path = request.app.state.video_dir
+
+    tmp_root = video_dir / "_chunks"
+    tmp_dir = tmp_root / upload_id
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # 固定命名，確保排序一致
+    part_path = tmp_dir / f"{index:06d}.part"
+
+    try:
+        with open(part_path, "wb") as f:
+            while True:
+                data = await chunk.read(1024 * 1024)
+                if not data:
+                    break
+                f.write(data)
+    except Exception as e:
+        raise HTTPException(500, f"寫入 chunk 失敗：{e}")
+
+    return {"ok": True, "index": index, "size": part_path.stat().st_size}
+
+
+
+# -------------------------
+# Chunk Upload: 合併 + 建立 session
+# POST /upload_complete
+# json: { upload_id, filename }
+# 回傳格式盡量對齊你原本 /upload
+# -------------------------
+@upload.post("/upload_complete")
+async def upload_complete(request: Request, payload: Dict):
+    upload_id = payload.get("upload_id")
+    filename = payload.get("filename")
+    if not upload_id or not filename:
+        raise HTTPException(400, "缺少 upload_id 或 filename")
+
+    ext = os.path.splitext(filename)[1].lower() or ".mp4"
+    if ext not in {".mp4", ".mov", ".avi", ".mkv"}:
+        raise HTTPException(400, "格式錯誤")
+
+    video_dir: Path = request.app.state.video_dir
+    chunk_dir = video_dir / "_chunks" / upload_id
+    if not chunk_dir.exists():
+        raise HTTPException(400, "找不到 chunks 暫存資料")
+
+    # 讀取所有 part
+    parts = sorted([p for p in chunk_dir.glob("*.part") if p.is_file()])
+    if not parts:
+        raise HTTPException(400, "沒有任何 chunk 檔案")
+
+    # 解析 index（檔名必須是 000000.part 這種）
+    def parse_idx(p: Path) -> int:
+        stem = p.name.split(".")[0]
+        return int(stem)
+
+    idxs = [parse_idx(p) for p in parts]
+
+    # 驗證：index 必須連續從 0 到 max
+    expected = list(range(0, max(idxs) + 1))
+    if idxs != expected:
+        missing = sorted(set(expected) - set(idxs))
+        dup = [x for x in idxs if idxs.count(x) > 1]
+        raise HTTPException(
+            400,
+            f"chunk 不完整/順序不對：missing={missing[:20]} dup={sorted(set(dup))[:20]} total_parts={len(parts)}",
+        )
+
+    # 合併
+    sid = uuid.uuid4().hex
+    vid = uuid.uuid4().hex
+    vpath = video_dir / f"{vid}{ext}"
+
+    try:
+        with open(vpath, "wb") as out:
+            for p in parts:
+                with open(p, "rb") as pf:
+                    shutil.copyfileobj(pf, out, length=1024 * 1024 * 8)  # 8MB buffer
+
+        # 立刻用 ffprobe/metadata 檢查是否真的可讀（很重要）
+        meta = get_video_meta(str(vpath))  # 你自己的 ffprobe wrapper
+        if not meta or meta.get("duration") in (None, 0):
+            raise RuntimeError("合併後影片 meta 無效（可能仍然壞檔/截斷）")
+
+        session_store: Dict[str, Dict] = request.app.state.session_store
+        session_store[sid] = {
+            "video_path": str(vpath),
+            "filename": filename,
+            "meta": meta,
+            "history": [],
+            "ball_tracks": None,
+            "poses": None,
+            "status": "idle",
+            "progress": 0,
+            "error": None,
+            "yolo_video_url": None,
+        }
+
+    except Exception as e:
+        try:
+            if vpath.exists():
+                vpath.unlink()
+        except Exception:
+            pass
+        raise HTTPException(500, f"合併/驗證失敗：{e}")
+
+    finally:
+        try:
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    return {"ok": True, "session_id": sid, "video_id": vid, "filename": filename, "meta": meta, "yolo_video_url": None}
+
+# -------------------------
+# (可選) 保留原本單次 /upload
+# 方便你測短影片用
+# -------------------------
 @upload.post("/upload")
 async def upload_video(request: Request, file: UploadFile = File(...)):
-    """
-    上傳只做兩件事：
-    1. 儲存影片到後端（實體檔案在 app.state.video_dir 底下）
-    2. 建立 session_id 方便之後分析用
-
-    前端預覽用自己的 blob，不用跟後端拿原始影片 URL
-    """
     if not file.filename:
         raise HTTPException(400, "無檔名")
 
@@ -41,13 +166,12 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
     if ext not in {".mp4", ".mov", ".avi", ".mkv"}:
         raise HTTPException(400, "格式錯誤")
 
-    video_dir: Path = request.app.state.video_dir  
+    video_dir: Path = request.app.state.video_dir
 
     sid = uuid.uuid4().hex
     vid = uuid.uuid4().hex
     vpath = video_dir / f"{vid}{ext}"
 
-    # 儲存上傳影片（分塊寫入，避免一次把整個檔案讀到記憶體）
     try:
         with open(vpath, "wb") as f:
             while True:
@@ -58,10 +182,8 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"儲存檔案失敗：{e}")
 
-    # 讀取影片基本資訊（長度、fps 之類的，取決於你 get_video_meta 的實作）
     meta = get_video_meta(str(vpath))
 
-    # session_store 統一都走 app.state.session_store
     session_store: Dict[str, Dict] = request.app.state.session_store
     session_store[sid] = {
         "video_path": str(vpath),
@@ -86,16 +208,19 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
     }
 
 
+# -------------------------
+# YOLO 背景任務：啟動 + /status 輪詢
+# -------------------------
 @analyze_yolo.post("/analyze_yolo")
 async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
-    """
-    啟動 YOLO 分析（背景任務），不直接回傳影片，
-    只回傳 ok=true，進度與結果由 /status 取得。
-    """
     session_store: Dict[str, Dict] = request.app.state.session_store
     sess = session_store.get(req.session_id)
     if not sess:
         raise HTTPException(400, "無效 session_id")
+
+    # 避免重複啟動（不然你會同時跑兩個分析、進度互打）
+    if sess.get("status") == "processing":
+        return {"ok": True}
 
     video_path = sess["video_path"]
     # 先從影片 meta 取得 fps 與總幀數
