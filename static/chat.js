@@ -72,7 +72,7 @@ export function initChat({ state, dom, utils }) {
           }
           const chunkText = decoder.decode(value, { stream: true });
           full += chunkText;
-          thinkingBubble.textContent = full;
+          thinkingBubble.append(document.createTextNode(chunkText));
 
           if (state.autoScroll) {
             dom.chatEl.scrollTop = dom.chatEl.scrollHeight;
