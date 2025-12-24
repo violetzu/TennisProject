@@ -1,21 +1,17 @@
 import asyncio
 import time
-from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+import shutil
 
 from fastapi import FastAPI
 from .utils import get_yolo_models
-from .config import BASE_DIR 
+from .config import VIDEO_DIR
 
-# ========= 設定 =========
+# ========= cleanup_loop設定 =========
 CHUNK_MAX_AGE_SECONDS = 60 * 60        # 1 小時，超過代表上傳已死
-VIDEO_MAX_AGE_SECONDS = 24 * 60 * 60   # 1 天，正式影片保留時間
-CHECK_INTERVAL_SECONDS = 600   # 清理檢查間隔
-
-# 路徑設定（假設專案結構是：project/main.py、project/videos、project/src_llm/...）
-VIDEO_DIR = BASE_DIR / "videos"
-VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+VIDEO_MAX_AGE_SECONDS = 2 * 60 * 60   # 2hr，正式影片保留時間
+CHECK_INTERVAL_SECONDS = 10  * 60    # 清理檢查間隔
 
 
 async def cleanup_loop() -> None:
