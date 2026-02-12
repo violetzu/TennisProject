@@ -88,13 +88,8 @@ cp .env.example .env
 > CLOUDFLARE_TUNNEL_TOKEN : 沒有使用可以直接留空
 
 ## 4. 執行程式
-### 預設（不使用 vllm）
 ```sh
 docker compose up -d --build
-```
-### 使用 vllm
-```sh
-docker compose --profile vllm up -d
 ```
 
 >本地網頁: http://localhost:8000
