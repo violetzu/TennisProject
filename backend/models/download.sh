@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -e
-
-# BALL_DIR="./ball"
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+BALL_DIR="$BASE_DIR/ball"
 # BALL_MODEL="best.pt"
 # BALL_URL="https://drive.google.com/uc?export=download&id=1Ca7riJgmfSxZRxafuUprcscp7bF75ARn"
 
-POSE_DIR="./person"
+POSE_DIR="$BASE_DIR/person"
 POSE_MODEL="yolo11n-pose.pt"
 POSE_URL="https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-pose.pt"
 

@@ -68,17 +68,13 @@ cd TennisProject/
 ```
 
 ## 2. 下載模型/
-<!-- ```sh
-bash models/download.sh
-``` -->
-### 下載球模型
-https://drive.google.com/file/d/1Ca7riJgmfSxZRxafuUprcscp7bF75ARn/view?usp=sharing
-放到`models/ball/`
 ### 下載人模型
 ```sh
-cd TennisProject/
-bash models/download.sh
+bash ./backend/models/download.sh
 ```
+### 下載球模型
+https://drive.google.com/file/d/1Ca7riJgmfSxZRxafuUprcscp7bF75ARn/view?usp=sharing
+放到`backend/models/ball/`
 
 ## 3. 使用建議.env 或自行修改
 ```sh
