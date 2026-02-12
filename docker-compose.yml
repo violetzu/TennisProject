@@ -21,7 +21,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./:/backend/
+      - .env:/backend/.env
+      - ./backend/:/backend/
+      - ./frontend/:/backend/frontend/
     tty: true
     stdin_open: true
     restart: unless-stopped

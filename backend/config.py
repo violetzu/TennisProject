@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent
 VIDEO_DIR = BASE_DIR / "videos"
 VIDEO_DIR.mkdir(exist_ok=True)
 
-BALL_MODEL_PATH  = Path(BASE_DIR / "models/ball/best.pt")
+BALL_MODEL_PATH = Path(BASE_DIR / "models/ball/best.pt")
 POSE_MODEL_PATH = Path(BASE_DIR / "models/person/yolo11n-pose.pt")
 
 #VLLM

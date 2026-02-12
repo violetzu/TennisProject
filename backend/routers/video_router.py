@@ -1,0 +1,197 @@
+from typing import Dict, Optional
+from pathlib import Path
+import asyncio, os, uuid, shutil
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from pydantic import BaseModel
+
+from analyze.analyze_video_with_yolo import analyze_video_with_yolo
+from analyze.utils import get_video_meta
+from config import VIDEO_DIR
+
+router = APIRouter()
+CHUNK_DIR = VIDEO_DIR / "_chunks"
+ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv"}
+MAX_FRAMES_LIMIT = 120000
+
+
+# ---------- Models ----------
+
+class AnalyzeRequest(BaseModel):
+    session_id: str
+    max_frames: Optional[int] = None
+    max_seconds: Optional[float] = None
+
+
+# ---------- Utils ----------
+
+def get_session(request: Request, sid: str) -> Dict:
+    store: Dict[str, Dict] = request.app.state.session_store
+    sess = store.get(sid)
+    if not sess:
+        raise HTTPException(400, "無效 session_id")
+    return sess
+
+
+def safe_ext(name: str) -> str:
+    ext = os.path.splitext(name)[1].lower() or ".mp4"
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(400, "格式錯誤")
+    return ext
+
+
+def write_uploadfile(dst: Path, file: UploadFile):
+    with open(dst, "wb") as f:
+        while chunk := file.file.read(1024 * 1024):
+            f.write(chunk)
+
+
+# ---------- Chunk Upload ----------
+
+@router.post("/upload_chunk")
+async def upload_chunk(upload_id: str, index: int, chunk: UploadFile = File(...)):
+    tmp_dir = CHUNK_DIR / upload_id
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    part = tmp_dir / f"{index:06d}.part"
+
+    try:
+        write_uploadfile(part, chunk)
+    except Exception as e:
+        raise HTTPException(500, f"寫入失敗: {e}")
+
+    return {"ok": True, "index": index}
+
+
+# ---------- Merge ----------
+
+@router.post("/upload_complete")
+async def upload_complete(request: Request, payload: Dict):
+    upload_id = payload.get("upload_id")
+    filename = payload.get("filename")
+
+    if not upload_id or not filename:
+        raise HTTPException(400, "缺少 upload_id 或 filename")
+
+    ext = safe_ext(filename)
+    chunk_dir = CHUNK_DIR / upload_id
+    parts = sorted(chunk_dir.glob("*.part"))
+
+    if not parts:
+        raise HTTPException(400, "沒有 chunk")
+
+    # 驗證 index 連續
+    idxs = [int(p.stem) for p in parts]
+    if idxs != list(range(len(parts))):
+        raise HTTPException(400, "chunk 不完整")
+
+    sid, vid = uuid.uuid4().hex, uuid.uuid4().hex
+    vpath = VIDEO_DIR / f"{vid}{ext}"
+
+    try:
+        with open(vpath, "wb") as out:
+            for p in parts:
+                with open(p, "rb") as f:
+                    shutil.copyfileobj(f, out)
+
+        meta = get_video_meta(str(vpath))
+        if not meta or not meta.get("duration"):
+            raise RuntimeError("影片損毀")
+
+        request.app.state.session_store[sid] = {
+            "video_path": str(vpath),
+            "filename": filename,
+            "meta": meta,
+            "history": [],
+            "ball_tracks": None,
+            "poses": None,
+            "status": "idle",
+            "progress": 0,
+            "error": None,
+            "yolo_video_url": None,
+        }
+
+    except Exception as e:
+        if vpath.exists():
+            vpath.unlink()
+        raise HTTPException(500, str(e))
+
+    finally:
+        shutil.rmtree(chunk_dir, ignore_errors=True)
+
+    return {
+        "ok": True,
+        "session_id": sid,
+        "video_id": vid,
+        "filename": filename,
+        "meta": meta,
+        "yolo_video_url": None,
+    }
+
+
+# ---------- Analyze ----------
+
+@router.post("/analyze_yolo")
+async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
+    sess = get_session(request, req.session_id)
+
+    if sess["status"] == "processing":
+        return {"ok": True}
+
+    meta = sess["meta"]
+    fps = meta.get("fps", 30)
+    total_frames = meta.get("frame_count", 0)
+
+    if req.max_frames:
+        max_frames = req.max_frames
+    elif req.max_seconds:
+        max_frames = int(req.max_seconds * fps)
+    else:
+        max_frames = total_frames or 300
+
+    max_frames = min(MAX_FRAMES_LIMIT, max(0, max_frames))
+    # 標記開始分析
+    sess.update(status="processing", progress=0, error=None)
+
+    def progress_cb(done, total):
+        sess["progress"] = min(int(done * 100 / total), 99)
+
+    async def runner():
+        try:
+            out = await asyncio.to_thread(
+                analyze_video_with_yolo,
+                sess["video_path"],
+                max_frames,
+                progress_cb,
+                request.app.state.yolo_ball_model,
+                request.app.state.yolo_pose_model,
+            )
+
+            p = Path(out)
+            if not p.exists():
+                raise RuntimeError("輸出影片不存在")
+
+            sess.update(
+                status="completed",
+                progress=100,
+                yolo_video_url=f"videos/{p.name}",
+            )
+        except Exception as e:
+            sess.update(status="failed", error=str(e), progress=0)
+
+    asyncio.create_task(runner())
+    return {"ok": True}
+
+
+# ---------- Status ----------
+
+@router.get("/status/{session_id}")
+async def get_status(session_id: str, request: Request):
+    sess = get_session(request, session_id)
+
+    return {
+        "status": sess["status"],
+        "progress": sess["progress"],
+        "error": sess["error"],
+        "yolo_video_url": sess.get("yolo_video_url"),
+    }
