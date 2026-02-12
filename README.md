@@ -2,89 +2,10 @@
 
 網球影片分析系統，整合 YOLOv8 物體偵測與 Qwen3-VL 大視覺模型進行網球比賽分析。
 
-## 📋 重要資訊
-
-### 模型與資料管理
-- **模型存儲**：[Google Drive](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
-  - 有新模型時直接上傳至 Google Drive，並更新 `app.sh` 中的對應檔名和連結
-  - 測試影片也統一存放在此
-- **網球資料集**：[Roboflow Dataset](https://universe.roboflow.com/viren-dhanwani/tennis-ball-detection/dataset/6)
-
-## 📁 檔案架構
-
-```
-TennisProject/
-├── app.py                 # FastAPI 應用程式入口
-├── app.sh                 # 模型和資料下載腳本
-├── requirements.txt       # Python 依賴
-├── tennis_prompt.txt      # LLM 系統提示詞
-│
-├── model/                 # 預訓練模型
-│   ├── ball/             # 網球偵測模型
-│   ├── court/            # 網球場偵測模型
-│   ├── bounce/           # 觸地偵測模型
-│   └── person/           # 人物姿態估計模型
-│
-├── src_llm/              # LLM 可調用的功能模組
-│   ├── analyze_video_with_yolo.py
-│   ├── chat_router.py
-│   ├── court_manager.py
-│   ├── video_router.py
-│   ├── utils.py
-│   └── lifespan.py
-│
-├── static/               # 前端靜態資源
-│   ├── index.html
-│   ├── chat.js
-│   ├── video.js
-│   ├── index.css
-│   └── theme-toggle.js
-│
-├── docker/               # Docker 設定檔
-│   ├── Dockerfile
-│   └── README.md
-│
-├── videos/               # 輸入影片目錄
-├── .env                  # 環境變數設定
-└── .gitignore
-```
-
-## 🐳 Docker 使用
-
-### Build 映像
-```bash
-cd ~/TennisProject
-docker build -f docker/Dockerfile -t tennis:latest .
-```
-
-### 執行容器
-```bash
-docker run --gpus all -it --rm \
-  -v ~/TennisProject:/workspace \
-  -p 8000:8000 \
-  tennis:latest /bin/bash
-```
-
-## 🚀 快速開始
-
-### 1. 準備環境
-```bash
-# 下載模型和測試資料
-./app.sh
-```
-
-### 2. 啟動服務
-```bash
-# 方式一：使用 uvicorn 直接運行（開發模式，支持熱重載）
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 3. 訪問應用
-- 前端：`http://localhost:8000`
-- API 文檔：`http://localhost:8000/docs`
+## **[快速啟動](#docker-compose-快速啟動)**
 
 ## 🏗️ 系統架構
-
+LLM部分可能prompt與payload都還需要調整
 ## ⚙️ 技術棧
 
 - **影片處理**：OpenCV
@@ -94,11 +15,86 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 - **前端**：HTML5 + JavaScript
 - **容器化**：Docker
 
-## 📝 筆記
-
-- Markdown preview 快捷鍵：`Ctrl+Shift+V`
+## 📁 檔案架構
+```
+TennisProject/
+├── app.py                # FastAPI 應用程式入口
+├── requirements.txt      # Python 依賴
+├── tennis_prompt.txt     # LLM 系統提示詞
+├── .env                  # 環境變數設定(優先)
+├── config.py             # 環境變數設定
+│
+├── videos/               # 上傳影片目錄
+│
+├── model/                # 預訓練模型
+│   ├── app.sh            # 模型下載腳本
+│   ├── ball/             # 網球偵測模型
+│   ├── person/           # 人物姿態估計模型
+│   ├── court/            # 網球場偵測模型
+│   └── bounce/           # 觸地偵測模型
+│
+├── routers/              # FastAPI 路由
+│   ├── chat_router.py    # 左側大模型呼叫
+│   ├── video_router.py   # 影片上傳及分析
+│   └── lifespan.py       # 初始化、定期清理上傳檔案
+│
+├── analyze/              # 分析相關程式(目前由video_router內程式呼叫，直接回傳影片路徑)
+│   ├── analyze_video_with_yolo.py
+│   ├── CW_action_test.py
+│   └── utils.py
+│
+├── frontend/             # 前端靜態資源(目前是靜態直接掛進fastapi之後或許會有完整前端)
+│   ├── index.html
+│   ├── chat.js
+│   ├── video.js
+│   ├── index.css
+│   └── theme-toggle.js
+│
+└── .gitignore
+```
 
 ## 🔗 相關連結
 
-- [Google Drive (模型和資料)](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
+- [Google Drive (模型和測試影片)](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
 - [Roboflow 網球資料集](https://universe.roboflow.com/viren-dhanwani/tennis-ball-detection/dataset/6)
+
+
+#  Docker Compose 快速啟動
+## 1. 下載程式
+```sh
+git clone https://github.com/violetzu/TennisProject.git
+cd TennisProject/
+```
+
+## 2. 下載模型/
+<!-- ```sh
+bash models/download.sh
+``` -->
+### 下載球模型
+https://drive.google.com/file/d/1Ca7riJgmfSxZRxafuUprcscp7bF75ARn/view?usp=sharing
+放到`models/ball/`
+### 下載人模型
+```sh
+cd TennisProject/
+bash models/download.sh
+```
+
+## 3. 使用建議.env 或自行修改
+```sh
+cp .env.example .env
+```
+> VLLM_MODEL : VLLM 載入 Qwen/Qwen3-VL-8B-Instruct 大約會使用30G記憶體，如果是一般顯卡可以從2B、4B往上嘗試
+
+> CLOUDFLARE_TUNNEL_TOKEN : 沒有使用可以直接留空
+
+## 4. 執行程式
+### 預設（不使用 vllm）
+```sh
+docker compose up -d --build
+```
+### 使用 vllm
+```sh
+docker compose --profile vllm up -d
+```
+
+>本地網頁: http://localhost:8000

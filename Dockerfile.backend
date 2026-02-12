@@ -15,17 +15,18 @@ RUN apt-get update && \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace
+WORKDIR /backend
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-COPY model/ball/yolov8_ball_09250900_best.pt ./model/ball/yolov8_ball_09250900_best.pt
-COPY model/person/yolo11n-pose.pt ./model/person/yolo11n-pose.pt
-COPY src_llm/ ./src_llm/
-COPY static/ ./static/
-COPY app.py .
+# COPY models/ball/best.pt ./model/ball/best.pt
+# COPY models/person/yolo11n-pose.pt ./model/person/yolo11n-pose.pt
+# COPY analyze/ ./analyze/
+# COPY static/ ./static/
+# COPY config.py .
+# COPY app.py .
 
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

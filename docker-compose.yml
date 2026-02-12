@@ -1,0 +1,35 @@
+services:
+  vllm:
+    image: qwenllm/qwenvl:qwen3vl-cu128
+    gpus: all
+    ipc: host
+    env_file:
+      - .env
+    volumes:
+      - ./start_vllm.sh:/start_vllm.sh:ro
+      - ./.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ./videos:/vllm-workspace/video
+    command: ["bash", "/start_vllm.sh"]
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    gpus: all
+    ipc: host
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/backend/
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+      
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+

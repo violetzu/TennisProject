@@ -5,8 +5,9 @@ from typing import AsyncGenerator
 import shutil
 
 from fastapi import FastAPI
-from .utils import get_yolo_models
-from .config import VIDEO_DIR
+# from analyze.utils import get_yolo_models
+from analyze.utils import get_yolo_models
+from config import VIDEO_DIR
 
 # ========= cleanup_loop設定 =========
 CHUNK_MAX_AGE_SECONDS = 60 * 60        # 1 小時，超過代表上傳已死

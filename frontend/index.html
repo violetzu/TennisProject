@@ -9,13 +9,13 @@
   <!-- 字體 -->
   <!-- <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap"> -->
-  <link rel="stylesheet" href="static/index.css?v=19" />
+  <link rel="stylesheet" href="frontend/index.css?v=19" />
 
   <!-- <script>
     // 動態插入 CSS（自動防快取）
     const css = document.createElement("link");
     css.rel = "stylesheet";
-    css.href = "static/index.css?v=" + Date.now();
+    css.href = "frontend/index.css?v=" + Date.now();
     document.head.appendChild(css);
   </script> -->
 </head>
@@ -61,7 +61,7 @@
       <div class="glass-base video-card">
         <div class="video-wrapper" id="dropZone">
           <div id="videoPlaceholder">
-            <img src="/static/update.svg" id="uploadIcon" alt="上傳圖示">
+            <img src="/frontend/update.svg" id="uploadIcon" alt="上傳圖示">
             <div>點擊新增或拖曳影片檔案到此區塊</div>
             <button class="vp-upload-btn" id="videoUploadBtn"></button>
           </div>
@@ -71,7 +71,7 @@
       </div>
     </div>
   </div>
-  <script type="module" src="static/theme-toggle.js"></script>
+  <script type="module" src="frontend/theme-toggle.js"></script>
   <script type="module">
     // 超簡單防快取：每次重新整理都拿到一組新版本號 
     // true = 防快取 / false = 不防快取
@@ -194,8 +194,8 @@
     const importWithVersion = (path) => import(`./${path}${DevelopmentMode ? `?v=${Date.now()}` : ""}`);
     (async () => {
       // 再載入 video / chat，並把 ui 的東西丟進去
-      const video = await importWithVersion('static/video.js');
-      const chat = await importWithVersion('static/chat.js');
+      const video = await importWithVersion('frontend/video.js');
+      const chat = await importWithVersion('frontend/chat.js');
 
       video.initVideo(UI);
       chat.initChat(UI);

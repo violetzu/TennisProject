@@ -1,22 +1,20 @@
-# 如果不用docker image
-# torch
-# torchvision
-
-# main.py 原本有用到的
-tqdm
-catboost
-mediapipe
-scenedetect
+# 舊專案用
+# tqdm
+# catboost
+# mediapipe
+# scenedetect
 
 # llm及調用需要
 fastapi
 uvicorn[standard]
 python-multipart
-opencv-python
+pydantic
+numpy
+requests
 pillow
 ultralytics
 lap
-ollama
 supervision
 python-dotenv
+opencv-python
 

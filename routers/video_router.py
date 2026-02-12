@@ -8,14 +8,11 @@ import shutil
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from pydantic import BaseModel
 
-from .analyze_video_with_yolo import analyze_video_with_yolo
-from .utils import get_video_meta
-
+from analyze.analyze_video_with_yolo import analyze_video_with_yolo
+from analyze.utils import get_video_meta
+from config import VIDEO_DIR
 # 三個 router
-status = APIRouter()
-upload = APIRouter()
-analyze_yolo = APIRouter()
-
+router = APIRouter()
 
 class AnalyzeRequest(BaseModel):
     session_id: str
@@ -28,7 +25,7 @@ class AnalyzeRequest(BaseModel):
 # POST /upload_chunk?upload_id=...&index=0&total=123
 # form-data: chunk=<blob>
 # -------------------------
-@upload.post("/upload_chunk")
+@router.post("/upload_chunk")
 async def upload_chunk(
     request: Request,
     upload_id: str,
@@ -36,9 +33,7 @@ async def upload_chunk(
     total: int,
     chunk: UploadFile = File(...),
 ):
-    video_dir: Path = request.app.state.video_dir
-
-    tmp_root = video_dir / "_chunks"
+    tmp_root = VIDEO_DIR / "_chunks"
     tmp_dir = tmp_root / upload_id
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -65,7 +60,7 @@ async def upload_chunk(
 # json: { upload_id, filename }
 # 回傳格式盡量對齊你原本 /upload
 # -------------------------
-@upload.post("/upload_complete")
+@router.post("/upload_complete")
 async def upload_complete(request: Request, payload: Dict):
     upload_id = payload.get("upload_id")
     filename = payload.get("filename")
@@ -76,8 +71,7 @@ async def upload_complete(request: Request, payload: Dict):
     if ext not in {".mp4", ".mov", ".avi", ".mkv"}:
         raise HTTPException(400, "格式錯誤")
 
-    video_dir: Path = request.app.state.video_dir
-    chunk_dir = video_dir / "_chunks" / upload_id
+    chunk_dir = VIDEO_DIR / "_chunks" / upload_id
     if not chunk_dir.exists():
         raise HTTPException(400, "找不到 chunks 暫存資料")
 
@@ -106,7 +100,7 @@ async def upload_complete(request: Request, payload: Dict):
     # 合併
     sid = uuid.uuid4().hex
     vid = uuid.uuid4().hex
-    vpath = video_dir / f"{vid}{ext}"
+    vpath = VIDEO_DIR / f"{vid}{ext}"
 
     try:
         with open(vpath, "wb") as out:
@@ -153,7 +147,7 @@ async def upload_complete(request: Request, payload: Dict):
 # -------------------------
 # YOLO 背景任務：啟動 + /status 輪詢
 # -------------------------
-@analyze_yolo.post("/analyze_yolo")
+@router.post("/analyze_yolo")
 async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
     session_store: Dict[str, Dict] = request.app.state.session_store
     sess = session_store.get(req.session_id)
@@ -230,9 +224,7 @@ async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
 
             sess["status"] = "completed"
             sess["progress"] = 100
-            # 這裡改回前端可用的靜態路徑，而不是實體路徑
-            # 假設 out_path 也存到 VIDEO_DIR 下
-            sess["yolo_video_url"] = f"/videos/{p.name}"
+            sess["yolo_video_url"] = f"videos/{p.name}"
         except Exception as e:
             sess["status"] = "failed"
             sess["error"] = str(e)
@@ -245,7 +237,7 @@ async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
     return {"ok": True}
 
 
-@status.get("/status/{session_id}")
+@router.get("/status/{session_id}")
 async def get_status(session_id: str, request: Request):
     session_store: Dict[str, Dict] = request.app.state.session_store
     sess = session_store.get(session_id)

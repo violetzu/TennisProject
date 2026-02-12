@@ -1,4 +1,5 @@
 __pycache__/
+.cache/
 *.mp4
 *.avi
 *.mov
@@ -8,10 +9,8 @@ __pycache__/
 *.cbm
 *.Identifier
 for me.md
-llm_server/
-common/
-tests/
-model/
+models/*
+!models/download.sh
 videos/
 *.env
 

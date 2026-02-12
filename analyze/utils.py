@@ -1,17 +1,10 @@
 from ultralytics import YOLO
 import torch
-from pathlib import Path
-import os 
-import cv2
 import subprocess
 import json
 from typing import Dict
 
-from .config import BASE_DIR
-
-BALL_MODEL_PATH = Path(os.getenv("BALL_MODEL_PATH", BASE_DIR / "model/ball/yolov8_ball_09250900_best.pt"))
-POSE_MODEL_PATH = Path(os.getenv("POSE_MODEL_PATH", BASE_DIR / "model/person/yolo11n-pose.pt"))
-
+from config import BALL_MODEL_PATH, POSE_MODEL_PATH
 
 def get_yolo_models(device: str | None = None) -> tuple[YOLO, YOLO]:
     if not BALL_MODEL_PATH.exists():
@@ -34,7 +27,7 @@ def get_yolo_models(device: str | None = None) -> tuple[YOLO, YOLO]:
     return ball_model, pose_model
 
 
-
+# import cv2
 # def get_video_meta(path: str) -> Dict:
 #     """使用 OpenCV 讀取影片的基本屬性 (FPS, 解析度, 總幀數)"""
 #     meta = {"fps": None, "frame_count": None, "width": None, "height": None, "duration": None}
