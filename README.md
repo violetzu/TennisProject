@@ -18,7 +18,7 @@ LLM部分可能prompt與payload都還需要調整
 ## 📁 檔案架構
 ```
 TennisProject/
-├── .env                      # 環境變數設定(全域)
+├── .env                      # 環境變數設定(全域最優先)
 ├── backend/                  # 後端資料夾
 │   ├── app.py                # FastAPI 應用程式入口
 │   ├── config.py             # 環境變數設定
