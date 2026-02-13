@@ -44,24 +44,25 @@ def build_messages(sess: dict, question: str):
     duration = float(meta["duration"])
     fps = float(meta["fps"])
 
-    sys_prompt = f"影片總長度：{duration:.1f} 秒。fps為{fps}"
     p = Path(BASE_DIR / "tennis_prompt.txt")
-    sys_prompt += p.read_text(encoding="utf-8")
+    sys_prompt = f"影片總長度：{duration:.1f} 秒;FPS:{fps:.2f}\n" + p.read_text(encoding="utf-8")
 
-    parts = []
+    messages = [{"role": "system", "content": sys_prompt}]
+
     for h in sess.get("history", [])[-10:]:
-        parts.append(f"Q:{h['user']} A:{h['assistant']}")
-    parts.append(f"新問題: {question}")
+        messages.append({"role": "user", "content": h["user"]})
+        messages.append({"role": "assistant", "content": h["assistant"]})
 
     video_url = f"{VIDEO_URL_DOMAIN}/videos/{Path(sess['video_path']).name}"
 
-    return [
-        {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": [
+    messages.append({
+        "role": "user",
+        "content": [
             {"type": "video_url", "video_url": {"url": video_url}},
-            {"type": "text", "text": "\n".join(parts)},
-        ]},
-    ]
+            {"type": "text", "text": question},
+        ],
+    })
+    return messages
 
 
 # ---------- Chat Endpoint ----------
