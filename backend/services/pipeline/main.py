@@ -30,7 +30,7 @@ VIDEO_DIR = os.path.join(BASE_DIR, "videos")
 
 COURT_MODEL_PTAH = os.path.join(BASE_DIR, "models", "keypoints_model.pth")
 BALL_MODEL_PTAH = os.path.join(BASE_DIR,  "models", "best_ball_detect_model.pt")
-BALL_DECTIONS_MODEL_PTAH = os.path.join(BASE_DIR, "models", "ball_detections.pkl")
+
 
 
 
@@ -81,7 +81,7 @@ def run_pipeline(input_path: str, output_name: str | None = None):
 	raw_ball_detections, detection_mask = ball_tracker.detect_frames(
 		video_frames,
 		read_from_stub=False,
-		stub_path=BALL_DECTIONS_MODEL_PTAH,
+		stub_path=os.path.join(BASE_DIR, "services", "pipeline", "trackers", "ball_detections.pkl"),
 	)
 	smooth_ball_positions = ball_tracker.interpolate_ball_positions(raw_ball_detections)
 
