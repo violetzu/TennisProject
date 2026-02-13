@@ -1,6 +1,8 @@
 services:
   vllm:
     image: qwenllm/qwenvl:qwen3vl-cu128
+    profiles:
+      - vllm
     gpus: all
     ipc: host
     env_file:
