@@ -1,0 +1,380 @@
+:root {
+  --glass-bg-light: rgba(255, 255, 255, 0.35);
+  --glass-bg-dark: rgba(0, 0, 0, 0.35);
+  --glass-border-light: rgba(255, 255, 255, 0.6);
+  --glass-border-dark: rgba(255, 255, 255, 0.15);
+  --text-light: #111827;
+  --text-dark: #e5e7eb;
+  --bg-light: radial-gradient(circle at 0% 0%, #e0f2fe 0%, #ffffff 55%, #e5e7eb 100%);
+  --bg-dark: radial-gradient(circle at 0% 0%, #1f2937 0%, #020617 55%, #000000 100%);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: "Noto Sans TC", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body.light {
+  background: var(--bg-light);
+  color: var(--text-light);
+}
+
+body.dark {
+  background: var(--bg-dark);
+  color: var(--text-dark);
+}
+
+/* ======= 通用玻璃樣式 ======= */
+/* ===== 更細膩、完全不突兀的 Apple-style 浮動 ===== */
+.glass-base {
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: var(--glass-bg-light);
+  border-radius: 18px;
+  border: 1px solid var(--glass-border-light);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  transition:
+    transform .25s ease-out,
+    box-shadow .25s ease-out,
+    background .25s ease,
+    border-color .25s ease;
+}
+
+body.dark .glass-base {
+  background: var(--glass-bg-dark);
+  border-color: var(--glass-border-dark);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.glass-base:hover {
+  /* 🔹不放大，只輕微上浮 2px */
+  transform: translateY(-2px);
+
+  /* 🔹更柔、更內斂的陰影 */
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+}
+
+
+/* ======= Header ======= */
+header {
+  height: 64px;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  /* 原本 font-size 大約 14px，把它變 28px (兩倍) */
+  font-size: 28px;
+  font-weight: 700;
+
+  /* 讓上下不要太空 → 高度變 50px 不要 40px */
+  height: 50px;
+  padding: 0 16px;
+
+  border-radius: 18px;
+  background: radial-gradient(circle at 0 0, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.05));
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+body.dark .header-chip {
+  background: radial-gradient(circle at 0 0, rgba(148, 163, 184, 0.3), rgba(15, 23, 42, 0.8));
+}
+
+/* ======= 主 Layout ======= */
+.main {
+  padding: 12px 20px 20px;
+  display: flex;
+  gap: 20px;
+  height: calc(100vh - 64px);
+}
+
+/* LLM 卡 */
+.llm-card {
+  @supports not (backdrop-filter: blur(1px)) {}
+
+  width: 32%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+}
+
+.composer {
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  padding: 10px 12px 12px;
+}
+
+body.dark .composer {
+  border-top-color: rgba(15, 23, 42, 0.8);
+}
+
+#query {
+  width: 100%;
+  min-height: 60px;
+  max-height: 150px;
+  resize: none;
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  outline: none;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+body.dark #query {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(148, 163, 184, 0.6);
+  color: var(--text-dark);
+}
+
+.send-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px 0;
+  border-radius: 999px;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  background: linear-gradient(135deg, #111827, #020617);
+  color: #f9fafb;
+  cursor: pointer;
+}
+
+.send-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Chat bubble */
+.msg-row {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.msg-row.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  padding: 9px 13px;
+  border-radius: 14px;
+  max-width: 82%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+.bubble.user {
+  background: #111827;
+  color: #f9fafb;
+  border-bottom-right-radius: 2px;
+}
+
+.bubble.assistant {
+  background: rgba(255, 255, 255, 0.85);
+  color: #111827;
+  border-bottom-left-radius: 2px;
+}
+
+body.dark .bubble.assistant {
+  background: rgba(15, 23, 42, 0.9);
+  color: #e5e7eb;
+}
+
+/* 右側區域 */
+.right-col {
+  width: 68%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 控制卡 */
+.control-card {
+  padding: 14px 16px 10px;
+  height: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn {
+  padding: 8px 16px;
+  font-size: 14px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: #111827;
+  color: #f9fafb;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.4);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-green {
+  background: linear-gradient(135deg, #22c55e, #4ade80);
+  color: #022c22;
+}
+
+.progress-bar-wrap {
+  width: 190px;
+  height: 8px;
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-left: auto;
+  display: none;
+}
+
+.progress-bar {
+  width: 0%;
+  height: 100%;
+  background: #22c55e;
+  transition: width .3s ease;
+}
+
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#videoInfo {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
+/* 影片卡 */
+.video-card {
+  flex: 1;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.video-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+#videoPlayer {
+  width: 100%;
+  height: 100%;
+  display: none;
+  object-fit: contain;
+  background: #000;
+}
+
+#overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* Placeholder / 拖曳上傳 */
+#videoPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.75);
+  cursor: pointer;
+}
+
+body.dark #videoPlaceholder {
+  color: rgba(226, 232, 240, 0.9);
+}
+
+#videoPlaceholder img {
+  width: 80px;
+  opacity: 0.85;
+}
+
+.drop-active {
+  outline: 2px dashed rgba(56, 189, 248, 0.9);
+  outline-offset: -6px;
+  background: radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.16), transparent 60%);
+}
+
+#uploadIcon {
+  width: 80px;
+  opacity: 0.9;
+  transition: filter 0.3s ease;
+}
+
+/* 暗黑模式 → 自動變白 */
+body.dark #uploadIcon {
+  filter: invert(1) brightness(1.8);
+}
+
+.vp-upload-btn {
+  display: none;
+}
+
+
+/* 響應式簡單處理 */
+@media (max-width: 960px) {
+  .main {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .llm-card,
+  .right-col {
+    width: 100%;
+  }
+
+  .video-wrapper {
+    height: 320px;
+  }
+
+}
+
+@media (max-width: 450px) {
+  .header-chip {
+    font-size: 25px;   /* 原本 28px → 縮小 */
+    height: 44px;      /* 跟著字縮 */
+    padding: 0 12px;
+
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    flex: 1;
+    min-width: 0;
+  }
+}
