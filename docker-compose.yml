@@ -32,8 +32,8 @@ services:
   frontend:
     image: node:20-alpine
     working_dir: /frontend
-    # command: sh -lc "npm ci && npm run dev"
-    command: sh -lc "npm ci && npm run build && npm run start"
+    # command: sh -lc "npm ci --include=dev && npm run dev"
+    command: sh -lc "npm ci --include=dev && npm run build && npm run start"
     env_file:
       - .env
     volumes:
