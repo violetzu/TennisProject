@@ -62,7 +62,7 @@ export default function Page() {
 
       <div className="main">
         <div className="glass-base llm-card">
-          {/* ✅ 左側卡片 Tabs */}
+          {/* 左側卡片 Tabs */}
           <div className="llm-tabs">
             <button
               className={`llm-tab ${leftTab === "chat" ? "active" : ""}`}
@@ -84,17 +84,44 @@ export default function Page() {
             </div>
           </div>
 
-          <div className="llm-body">
-            {leftTab === "chat" ? (
+          {/* 內容區：兩個都 render，不卸載；用 hidden 方式切 */}
+          <div className="llm-body" style={{ position: "relative" }}>
+            {/* Chat：保留狀態 */}
+            <div
+              style={{
+                position: leftTab === "chat" ? "relative" : "absolute",
+                inset: leftTab === "chat" ? undefined : 0,
+                width: "100%",
+                height: "100%",
+                visibility: leftTab === "chat" ? "visible" : "hidden",
+                pointerEvents: leftTab === "chat" ? "auto" : "none",
+              }}
+            >
               <ChatPanel sessionId={sessionId} />
-            ) : (
-              <AnalysisPanel activeTab={analysisTab} onTabChange={setAnalysisTab} worldData={worldData} />
-            )}
+            </div>
+
+            {/* Analysis：保留狀態 */}
+            <div
+              style={{
+                position: leftTab === "analysis" ? "relative" : "absolute",
+                inset: leftTab === "analysis" ? undefined : 0,
+                width: "100%",
+                height: "100%",
+                visibility: leftTab === "analysis" ? "visible" : "hidden",
+                pointerEvents: leftTab === "analysis" ? "auto" : "none",
+              }}
+            >
+              <AnalysisPanel
+                activeTab={analysisTab}
+                onTabChange={setAnalysisTab}
+                worldData={worldData}
+              />
+            </div>
           </div>
         </div>
 
         <div className="right-col">
-           <VideoPanel
+          <VideoPanel
             sessionId={sessionId}
             setSessionId={setSessionId}
             startPipelinePolling={startPipelinePolling}

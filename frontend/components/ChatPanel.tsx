@@ -44,8 +44,7 @@ export default function ChatPanel({ sessionId }: { sessionId: string | null }) {
   }
 
   return (
-    <>
-      {/* 重要：id="chat" 才會吃到你 CSS 的 #chat */}
+    <div className="chat-shell">
       <div id="chat" ref={chatRef}>
         {messages.map((m, idx) => (
           <div key={idx} className={`msg-row ${m.role}`}>
@@ -54,7 +53,6 @@ export default function ChatPanel({ sessionId }: { sessionId: string | null }) {
         ))}
       </div>
 
-      {/* 重要：className="composer"、#query、#sendBtn */}
       <div className="composer">
         <textarea
           id="query"
@@ -79,6 +77,6 @@ export default function ChatPanel({ sessionId }: { sessionId: string | null }) {
           送出
         </button>
       </div>
-    </>
+    </div>
   );
 }
