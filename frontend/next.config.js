@@ -15,6 +15,8 @@ const nextConfig = {
     return [
       { source: '/api/:path*', destination: 'http://backend:8000/:path*' },
       { source: '/videos/:path*', destination: 'http://backend:8000/videos/:path*' },
+      { source: '/docs', destination: 'http://backend:8000/docs' },
+      { source: '/openapi.json', destination: 'http://backend:8000/openapi.json' },
     ]
   },
 }
