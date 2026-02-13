@@ -10,7 +10,8 @@ __pycache__/
 *.Identifier
 for me.md
 models/*
-!models/download.sh
+!backend/models/download.sh
+!backend/models/best_ball_detect_model.pt
 videos/
 *.env
 backend/data/*
