@@ -19,9 +19,11 @@ function formatDuration(seconds?: number) {
 export default function VideoPanel({
   sessionId,
   setSessionId,
+  startPipelinePolling,
 }: {
   sessionId: string | null;
   setSessionId: (id: string | null) => void;
+  startPipelinePolling: () => void;
 }) {
   // ===== DOM refs（對齊你原本 id 結構）=====
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -307,6 +309,42 @@ export default function VideoPanel({
           >
             {analysisCompleted ? "下載分析後影片" : "YOLO 分析"}
           </button>
+
+
+         <button
+          className="btn btn-green"
+          type="button"
+          disabled={busy || !sessionId}
+          onClick={async () => {
+            try {
+              setBusy(true);
+              setStatusText("Pipeline 分析啟動中...");
+
+              const res = await fetch("/api/analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: sessionId }),
+              });
+
+              if (!res.ok) throw new Error(await res.text().catch(() => "啟動失敗"));
+              const data = await res.json();
+              if (!data.ok) throw new Error(data.error || "啟動失敗");
+
+              setStatusText("Pipeline 已啟動，請到左側「分析結果」查看");
+
+              // ✅ 這行是關鍵：開始輪詢 /status 拿 pipeline_status + worldData
+              startPipelinePolling();
+            } catch (e: any) {
+              alert("Pipeline 分析啟動失敗：" + (e?.message || String(e)));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Pipeline 分析
+        </button>
+
+
 
           <button
             className="btn"

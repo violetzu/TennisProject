@@ -13,4 +13,4 @@ models/*
 !models/download.sh
 videos/
 *.env
-
+backend/data/*

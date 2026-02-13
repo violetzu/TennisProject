@@ -345,6 +345,262 @@ body.dark #uploadIcon {
   display: none;
 }
 
+/* =========================
+   LLM Card Tabs (左側頁籤)
+   ========================= */
+
+.llm-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 10px 12px 8px;
+
+  /* 跟 composer 一樣的分隔感 */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+body.dark .llm-tabs {
+  border-bottom-color: rgba(15, 23, 42, 0.8);
+}
+
+.llm-tab {
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-light);
+
+  cursor: pointer;
+  transition: transform .2s ease, background .2s ease, border-color .2s ease, opacity .2s ease;
+}
+
+.llm-tab:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(148, 163, 184, 0.75);
+}
+
+.llm-tab:active {
+  transform: translateY(0px);
+  opacity: 0.9;
+}
+
+.llm-tab.active {
+  /* 跟你 btn / bubble 的暗色呼應 */
+  background: #111827;
+  border-color: rgba(17, 24, 39, 0.8);
+  color: #f9fafb;
+}
+
+body.dark .llm-tab {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: var(--text-dark);
+}
+
+body.dark .llm-tab:hover {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+body.dark .llm-tab.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #e5e7eb;
+}
+
+.llm-tabs-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.llm-hint {
+  font-size: 12px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+@media (max-width: 960px) {
+  .llm-hint {
+    max-width: 160px;
+  }
+}
+
+/* 內容區：分析結果 / 對話共用 */
+.llm-body {
+  flex: 1;
+  overflow: hidden; /* 避免內容撐爆圓角 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* 如果你要讓 AnalysisPanel 自己卷軸 */
+.llm-body-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 12px 14px;
+}
+
+
+/* =========================
+   AnalysisPanel (右下/左卡內)
+   ========================= */
+
+.bottom-panel {
+  /* 跟你 chat 一樣：內容可卷 */
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 8px;
+
+  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+body.dark .panel-tabs {
+  border-bottom-color: rgba(15, 23, 42, 0.8);
+}
+
+.panel-tab {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--text-light);
+
+  cursor: pointer;
+  user-select: none;
+
+  transition: transform .2s ease, background .2s ease, border-color .2s ease, opacity .2s ease;
+}
+
+.panel-tab:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(148, 163, 184, 0.75);
+}
+
+.panel-tab.active {
+  background: #111827;
+  border-color: rgba(17, 24, 39, 0.8);
+  color: #f9fafb;
+}
+
+body.dark .panel-tab {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: var(--text-dark);
+}
+
+body.dark .panel-tab:hover {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+body.dark .panel-tab.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #e5e7eb;
+}
+
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 12px 14px;
+}
+
+/* 空狀態文字（你原本用 file-tree-empty） */
+.file-tree-empty {
+  padding: 14px 12px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+/* 統計卡片 grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* 視窗窄時：一欄 */
+@media (max-width: 960px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 統計卡片（玻璃內的小玻璃） */
+.stat-card {
+  padding: 10px 12px;
+  border-radius: 14px;
+
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.55);
+
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.10);
+  transition: transform .2s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(148, 163, 184, 0.75);
+}
+
+body.dark .stat-card {
+  background: rgba(15, 23, 42, 0.65);
+  border-color: rgba(148, 163, 184, 0.35);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+body.dark .stat-card:hover {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+/* 文字 */
+.stat-label {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.stat-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* 讓 SVG 落點圖在暗色模式更融入（外框柔一點） */
+body.dark svg {
+  filter: saturate(1.05);
+}
+
 
 /* 響應式簡單處理 */
 @media (max-width: 960px) {

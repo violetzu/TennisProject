@@ -103,12 +103,26 @@ async def upload_complete(request: Request, payload: Dict):
             "filename": filename,
             "meta": meta,
             "history": [],
+
+            # ---- YOLO 狀態 ----
+            "yolo_status": "idle",      # idle / processing / completed / failed
+            "yolo_progress": 0,
+            "yolo_error": None,
+            "yolo_video_url": None,
             "ball_tracks": None,
             "poses": None,
-            "status": "idle",
-            "progress": 0,
-            "error": None,
-            "yolo_video_url": None,
+
+            # ---- Pipeline 狀態 ----
+            "pipeline_status": "idle",  # idle / processing / completed / failed
+            "pipeline_progress": 0,
+            "pipeline_error": None,
+
+            "job_id": None,
+            "world_json_path": None,
+            "video_json_path": None,
+            "output_video_path": None,
+            "minicourt_video_path": None,
+            "worldData": None,
         }
 
     except Exception as e:
@@ -135,7 +149,7 @@ async def upload_complete(request: Request, payload: Dict):
 async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
     sess = get_session(request, req.session_id)
 
-    if sess["status"] == "processing":
+    if sess["yolo_status"] == "processing":
         return {"ok": True}
 
     meta = sess["meta"]
@@ -150,11 +164,11 @@ async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
         max_frames = total_frames or 300
 
     max_frames = min(MAX_FRAMES_LIMIT, max(0, max_frames))
-    # 標記開始分析
-    sess.update(status="processing", progress=0, error=None)
+
+    sess.update(yolo_status="processing", yolo_progress=0, yolo_error=None)
 
     def progress_cb(done, total):
-        sess["progress"] = min(int(done * 100 / total), 99)
+        sess["yolo_progress"] = min(int(done * 100 / total), 99)
 
     async def runner():
         try:
@@ -172,26 +186,118 @@ async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
                 raise RuntimeError("輸出影片不存在")
 
             sess.update(
-                status="completed",
-                progress=100,
+                yolo_status="completed",
+                yolo_progress=100,
                 yolo_video_url=f"videos/{p.name}",
             )
         except Exception as e:
-            sess.update(status="failed", error=str(e), progress=0)
+            sess.update(yolo_status="failed", yolo_error=str(e), yolo_progress=0)
 
     asyncio.create_task(runner())
     return {"ok": True}
 
 
+
+    
+    
+import json
+# from pipeline import run_pipeline  # 依你的實際位置改
+from services.pipeline.main import run_pipeline  # 依你的實際位置改
+
+class PipelineAnalyzeRequest(BaseModel):
+    session_id: str
+    job_id: Optional[str] = None
+
+@router.post("/analyze")
+async def analyze_api(req: PipelineAnalyzeRequest, request: Request):
+    sess = get_session(request, req.session_id)
+
+    if sess["pipeline_status"] == "processing":
+        return {"ok": True, "session_id": req.session_id}
+
+    vpath = Path(sess["video_path"])
+    if not vpath.exists():
+        raise HTTPException(400, "找不到影片檔案，請重新上傳")
+
+    ext = vpath.suffix.lower()
+    if ext not in ALLOWED_EXT and ext not in {".webm"}:
+        raise HTTPException(400, "Unsupported video type")
+
+    job_id = req.job_id or uuid.uuid4().hex[:12]
+
+    # ✅ 標記開始（Pipeline）
+    sess.update(
+        pipeline_status="processing",
+        pipeline_progress=0,
+        pipeline_error=None,
+
+        job_id=job_id,
+        world_json_path=None,
+        video_json_path=None,
+        output_video_path=None,
+        minicourt_video_path=None,
+        worldData=None,
+    )
+
+    async def runner():
+        try:
+            sess["pipeline_progress"] = 5
+
+            outputs = await asyncio.to_thread(
+                run_pipeline,
+                input_path=str(vpath),
+                output_name=job_id,
+            )
+
+            sess["pipeline_progress"] = 90
+
+            world_json_path = outputs.get("world_json")
+            if not world_json_path or not Path(world_json_path).exists():
+                raise RuntimeError("Pipeline 完成但找不到 world_json")
+
+            with open(world_json_path, "r", encoding="utf-8") as f:
+                world_data = json.load(f)
+
+            sess.update(
+                pipeline_status="completed",
+                pipeline_progress=100,
+                world_json_path=world_json_path,
+                video_json_path=outputs.get("video_json"),
+                output_video_path=outputs.get("output_video"),
+                minicourt_video_path=outputs.get("minicourt_video"),
+                worldData=world_data,
+            )
+        except Exception as e:
+            sess.update(pipeline_status="failed", pipeline_error=str(e), pipeline_progress=0)
+
+    asyncio.create_task(runner())
+    return {"ok": True, "session_id": req.session_id, "job_id": job_id}
+
+
 # ---------- Status ----------
+
 
 @router.get("/status/{session_id}")
 async def get_status(session_id: str, request: Request):
     sess = get_session(request, session_id)
 
     return {
-        "status": sess["status"],
-        "progress": sess["progress"],
-        "error": sess["error"],
+        "session_id": session_id,
+
+        # ---- Pipeline ----
+        "pipeline_status": sess.get("pipeline_status"),
+        "pipeline_progress": sess.get("pipeline_progress"),
+        "pipeline_error": sess.get("pipeline_error"),
+        "job_id": sess.get("job_id"),
+        "world_json_path": sess.get("world_json_path"),
+        "video_json_path": sess.get("video_json_path"),
+        "output_video_path": sess.get("output_video_path"),
+        "minicourt_video_path": sess.get("minicourt_video_path"),
+        "worldData": sess.get("worldData"),
+
+        # ---- YOLO ----
+        "yolo_status": sess.get("yolo_status"),
+        "yolo_progress": sess.get("yolo_progress"),
+        "yolo_error": sess.get("yolo_error"),
         "yolo_video_url": sess.get("yolo_video_url"),
     }
