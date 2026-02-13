@@ -411,7 +411,8 @@ export default function VideoPanel({
           className="video-wrapper"
           id="dropZone"
           ref={wrapperRef}
-          onClick={triggerFileSelect}
+          onClick={!hasAnyVideo ? triggerFileSelect : undefined}
+
         >
           <div
             id="videoPlaceholder"
@@ -438,6 +439,7 @@ export default function VideoPanel({
             id="videoPlayer"
             ref={videoRef}
             controls
+            onClick={(e) => e.stopPropagation()}
             style={{ display: hasAnyVideo ? "block" : "none" }}
           />
 
