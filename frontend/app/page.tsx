@@ -2,6 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import ThemeToggle from "@/components/ThemeToggle";
 import ChatPanel from "@/components/ChatPanel";
 import VideoPanel from "@/components/VideoPanel";
 import AnalysisPanel from "@/components/AnalysisPanel";
@@ -55,7 +56,7 @@ export default function Page() {
         <div className="glass-base header-chip">網球比賽分析助手</div>
 
         <div suppressHydrationWarning>
-          <theme-toggle />
+          <ThemeToggle />
         </div>
       </header>
 
