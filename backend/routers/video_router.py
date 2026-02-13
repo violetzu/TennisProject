@@ -1,12 +1,14 @@
 from typing import Dict, Optional
 from pathlib import Path
 import asyncio, os, uuid, shutil
+import json
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from pydantic import BaseModel
 
-from analyze.analyze_video_with_yolo import analyze_video_with_yolo
-from analyze.utils import get_video_meta
+from services.analyze.analyze_video_with_yolo import analyze_video_with_yolo
+from services.analyze.utils import get_video_meta
+from services.pipeline.main import run_pipeline
 from config import VIDEO_DIR
 
 router = APIRouter()
@@ -200,9 +202,7 @@ async def analyze_yolo_api(req: AnalyzeRequest, request: Request):
 
     
     
-import json
-# from pipeline import run_pipeline  # 依你的實際位置改
-from services.pipeline.main import run_pipeline  # 依你的實際位置改
+
 
 class PipelineAnalyzeRequest(BaseModel):
     session_id: str

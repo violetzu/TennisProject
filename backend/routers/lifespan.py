@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 from pathlib import Path
 
 from fastapi import FastAPI
-from analyze.utils import get_yolo_models
+from services.analyze.utils import get_yolo_models
 from config import VIDEO_DIR
 
 
