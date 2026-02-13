@@ -3,11 +3,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+type YoloStatus = "idle" | "processing" | "failed" | "completed";
+
 type StatusResp = {
-  status?: "idle" | "processing" | "failed" | "completed";
-  progress?: number;
-  error?: string;
+  yolo_status?: YoloStatus;
+  yolo_progress?: number;
+  yolo_error?: string;
   yolo_video_url?: string;
+
+  // 其他欄位（pipeline）我們不管
+  pipeline_status?: any;
+  pipeline_progress?: any;
 };
 
 export function useYoloStatus(sessionId: string | null) {
@@ -36,7 +42,7 @@ export function useYoloStatus(sessionId: string | null) {
     if (!sessionId) return;
 
     try {
-      const res = await fetch(`/api/status/${sessionId}`);
+      const res = await fetch(`/api/status/${sessionId}`, { cache: "no-store" });
 
       if (res.status === 404) {
         const now = Date.now();
@@ -68,16 +74,17 @@ export function useYoloStatus(sessionId: string | null) {
 
       const data = (await res.json()) as StatusResp;
 
-      const p = Math.max(0, Math.min(100, data.progress ?? 0));
+      const st: YoloStatus = data.yolo_status ?? "idle";
+      const p = Math.max(0, Math.min(100, Number(data.yolo_progress ?? 0) || 0));
       setProgress(p);
 
-      if (data.status === "processing") {
+      if (st === "processing") {
         setStatusText(`YOLO 分析中... ${p}%`);
-      } else if (data.status === "failed") {
+      } else if (st === "failed") {
         setStatusText("分析失敗");
         stopPolling();
-        if (data.error) alert("YOLO 分析失敗：" + data.error);
-      } else if (data.status === "completed") {
+        if (data.yolo_error) alert("YOLO 分析失敗：" + data.yolo_error);
+      } else if (st === "completed") {
         stopPolling();
         setProgress(100);
         setAnalysisCompleted(true);
@@ -88,22 +95,36 @@ export function useYoloStatus(sessionId: string | null) {
         } else {
           setStatusText("分析完成（但缺少 yolo_video_url）");
         }
+      } else {
+        // idle
+        if (!analysisCompleted && p === 0) {
+          setStatusText("等待開始 YOLO 分析");
+        }
       }
     } catch {
       setStatusText("查詢狀態失敗（可能網路不穩）");
     }
-  }, [sessionId, stopPolling]);
+  }, [sessionId, stopPolling, analysisCompleted]);
 
   const startPolling = useCallback(() => {
     if (!sessionId) return;
     stopPolling();
-    fetchOnce();
-    pollRef.current = window.setInterval(fetchOnce, 1000);
+    void fetchOnce();
+    pollRef.current = window.setInterval(() => void fetchOnce(), 1000);
   }, [sessionId, fetchOnce, stopPolling]);
 
   useEffect(() => {
     return () => stopPolling();
   }, [stopPolling]);
+
+  // session 換片就 reset（避免沿用上一支影片）
+  useEffect(() => {
+    stopPolling();
+    setProgress(0);
+    setYoloVideoUrl(null);
+    setAnalysisCompleted(false);
+    setStatusText(sessionId ? "影片已就緒" : "請先上傳影片");
+  }, [sessionId, stopPolling]);
 
   return {
     statusText,
