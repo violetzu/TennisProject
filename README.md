@@ -28,7 +28,7 @@ TennisProject/
 │   ├── videos/               # 上傳影片目錄
 │   │
 │   ├── models/               # 預訓練模型
-│   │   ├── app.sh            # 模型下載腳本
+│   │   ├── download.sh            # 模型下載腳本
 │   │   ├── ball/             # 網球偵測模型
 │   │   ├── person/           # 人物姿態估計模型
 │   │   ├── court/            # 網球場偵測模型
