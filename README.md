@@ -130,6 +130,10 @@ bash ./backend/models/download.sh
 ```sh
 cp .env.example .env
 ```
+> 前端要使用開發模式(npm run dev)的話 : FRONTEND_DEV_MODE=true
+
+> 後端要使用開發模式(--reload)的話 : BACKEND_DEV_MODE=true
+
 > VLLM_MODEL : VLLM 載入 Qwen/Qwen3-VL-8B-Instruct 大約會使用30G記憶體，如果是一般顯卡可以從2B、4B往上嘗試 ， 不使用可以無視
 
 > CLOUDFLARE_TUNNEL_TOKEN : 沒有使用可以直接留空
@@ -144,8 +148,7 @@ docker compose --profile vllm up -d --build
 docker compose up -d --build
 ```
 
->本地網頁: http://localhost:3000
+### 本地網頁: http://localhost:3000
 
->前端要使用開發模式的話把 compose [35、36/44、45行](docker-compose.yml) 互相反註解
 
 ### [(教學)Ubuntu 安裝 Docker + NVIDIA Container Toolkit](https://github.com/violetzu/knowledge/blob/01ecf7828174c0a082418e4410d5e8081abc7799/docker%20install.md)

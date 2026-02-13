@@ -5,6 +5,8 @@ services:
       - vllm
     gpus: all
     ipc: host
+    expose:
+      - "8005"
     env_file:
       - .env
     volumes:
@@ -25,8 +27,10 @@ services:
     env_file:
       - .env
     volumes:
-      # - .env:/backend/.env
       - ./backend/:/backend/
+    command: >
+      uvicorn app:app --host 0.0.0.0 --port 8000
+      ${BACKEND_DEV_MODE:+--reload --reload-dir /backend}
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -34,17 +38,14 @@ services:
   frontend:
     image: node:20-alpine
     working_dir: /frontend
-    # command: sh -lc "npm ci --include=dev && npm run dev"
-    command: sh -lc "npm ci --include=dev && npm run build && npm run start"
+    command: ["sh", "/frontend.sh"]
     env_file:
       - .env
     volumes:
+      - ./docker/frontend.sh:/frontend.sh:ro
       - ./frontend:/frontend
     ports:
       - "3000:3000"
-    environment:
-      # - NODE_ENV=development
-      - NODE_ENV=production
     restart: unless-stopped
   cloudflared:
     image: cloudflare/cloudflared:latest
