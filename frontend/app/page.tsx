@@ -1,7 +1,7 @@
 // app/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 import ChatPanel from "@/components/ChatPanel";
 import VideoPanel from "@/components/VideoPanel";
@@ -28,33 +28,10 @@ export default function Page() {
     startPolling: startPipelinePolling,
   } = usePipelineStatus(sessionId);
 
-  const pipelineHint = useMemo(() => {
-    if (!sessionId) return "請先上傳影片";
-    if (pipelineStatus === "idle") return "尚未開始分析";
-    if (pipelineStatus === "processing") return `分析中… ${pipelineProgress}%`;
-    if (pipelineStatus === "completed") return "分析完成";
-    if (pipelineStatus === "failed") return `分析失敗：${pipelineError || "未知錯誤"}`;
-    return String(pipelineStatus);
-  }, [sessionId, pipelineStatus, pipelineProgress, pipelineError]);
-
-  async function startPipelineAnalyze() {
-    if (!sessionId) return;
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-    if (!res.ok) throw new Error(await res.text().catch(() => "啟動分析失敗"));
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || "啟動分析失敗");
-    startPipelinePolling();
-  }
-
   return (
     <>
       <header className="header">
         <div className="glass-base header-chip">網球比賽分析助手</div>
-
         <div suppressHydrationWarning>
           <ThemeToggle />
         </div>
@@ -71,6 +48,7 @@ export default function Page() {
             >
               對話
             </button>
+
             <button
               className={`llm-tab ${leftTab === "analysis" ? "active" : ""}`}
               onClick={() => setLeftTab("analysis")}
@@ -78,15 +56,10 @@ export default function Page() {
             >
               分析結果
             </button>
-
-            <div className="llm-tabs-right">
-              <span className="llm-hint">{pipelineHint}</span>
-            </div>
           </div>
 
-          {/* 內容區：兩個都 render，不卸載；用 hidden 方式切 */}
+          {/* 內容區：不卸載，切換用疊層 hidden（保留聊天紀錄） */}
           <div className="llm-body" style={{ position: "relative" }}>
-            {/* Chat：保留狀態 */}
             <div
               style={{
                 position: leftTab === "chat" ? "relative" : "absolute",
@@ -100,7 +73,6 @@ export default function Page() {
               <ChatPanel sessionId={sessionId} />
             </div>
 
-            {/* Analysis：保留狀態 */}
             <div
               style={{
                 position: leftTab === "analysis" ? "relative" : "absolute",
@@ -125,6 +97,10 @@ export default function Page() {
             sessionId={sessionId}
             setSessionId={setSessionId}
             startPipelinePolling={startPipelinePolling}
+            pipelineStatus={pipelineStatus}
+            pipelineProgress={pipelineProgress}
+            pipelineError={pipelineError}
+            onShowAnalysis={() => setLeftTab("analysis")}
           />
         </div>
       </div>
