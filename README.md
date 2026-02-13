@@ -89,4 +89,6 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
->本地網頁: http://localhost:8000
+>本地網頁: http://localhost:3000
+
+>前端要使用開發模式的話把 compose [35、36/44、45行](docker-compose.yml) 互相反註解
