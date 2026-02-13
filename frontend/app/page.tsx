@@ -4,7 +4,6 @@
 import { useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import VideoPanel from "@/components/VideoPanel";
-import ThemeToggle from "@/components/ThemeToggle";
 
 export default function Page() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -13,7 +12,10 @@ export default function Page() {
     <>
       <header className="header">
         <div className="glass-base header-chip">網球比賽分析助手</div>
-        <ThemeToggle />
+
+        <div suppressHydrationWarning>
+          <theme-toggle />
+        </div>
       </header>
 
       <div className="main">
