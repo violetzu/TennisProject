@@ -16,3 +16,4 @@ videos/
 *.env
 backend/data/*
 *.pkl
+/data/*
