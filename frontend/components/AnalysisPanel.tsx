@@ -1,3 +1,4 @@
+// components/AnalysisPanel.tsx
 "use client";
 
 import React, { useMemo } from "react";
@@ -40,6 +41,12 @@ function StatCard({
   );
 }
 
+type PlayerSide = "top" | "bottom";
+
+function asPlayerSide(v: any): PlayerSide {
+  return v === "top" ? "top" : "bottom"; 
+}
+
 function useRallyAnalysis(worldData: any) {
   return useMemo(() => {
     if (!worldData?.frames) return null;
@@ -68,7 +75,7 @@ function useRallyAnalysis(worldData: any) {
             x: ballWorld?.[0],
             y: ballWorld?.[1],
             speed: postSpeed,
-            player: typeof ballWorld?.[1] === "number" && ballWorld[1] < COURT.netY ? "top" : "bottom",
+            player: (typeof ballWorld?.[1] === "number" && ballWorld[1] < COURT.netY ? "top" : "bottom") as PlayerSide,
           });
         }
       }
@@ -97,11 +104,12 @@ function useRallyAnalysis(worldData: any) {
 
     for (const rally of rallies) {
       if (rally.serve) {
-        playerStats[rally.serve.player].serves++;
-        playerStats[rally.serve.player].shots++;
+        const p = asPlayerSide(rally.serve.player);
+        playerStats[p].serves++;
+        playerStats[p].shots++;
       }
       for (const shot of rally.shots || []) {
-        playerStats[shot.player].shots++;
+        playerStats[asPlayerSide(shot.player)].shots++;
       }
       if (rally.winner) {
         const winnerPlayer = rally.winner.y < COURT.netY ? "bottom" : "top";
