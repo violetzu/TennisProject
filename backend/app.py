@@ -1,10 +1,14 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+
+from database import Base, engine
+from sql_models import User, VideoAsset, AnalysisRecord
 
 from routers import lifespan, chat_router, video_router
 from config import BASE_DIR, VIDEO_DIR
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Tennis Video Backend", lifespan=lifespan)
 
