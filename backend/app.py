@@ -5,8 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
 from sql_models import User, VideoAsset, AnalysisRecord
 
-from routers import lifespan, chat_router, video_router
-from config import BASE_DIR, VIDEO_DIR
+from routers.lifespan import lifespan
+from routers.user_router import router as user_router
+from routers.chat_router import router as chat_router
+from routers.video_router import router as video_router
+from routers.analyze_router import router as analyze_router
+
+from config import VIDEO_DIR
 
 Base.metadata.create_all(bind=engine)
 
@@ -31,6 +36,6 @@ app.add_middleware(
 
 # Router
 app.include_router(chat_router)
+app.include_router(user_router)
 app.include_router(video_router)
-
-# app.include_router(video_router, prefix="/api/video", tags=["video"])
+app.include_router(analyze_router)
