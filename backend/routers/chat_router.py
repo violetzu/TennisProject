@@ -6,7 +6,7 @@ import json, requests
 
 from config import BASE_DIR, VLLM_URL, VLLM_API_KEY, VLLM_MODEL, VIDEO_URL_DOMAIN
 
-router = APIRouter()
+router = APIRouter(prefix="/api", tags=["chat"])
 REMOVE_CHARS = "*#"
 
 
