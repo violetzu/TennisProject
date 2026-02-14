@@ -258,9 +258,13 @@ export function useVideoPanelController({
   }, [sessionId, meta?.duration, setStatusText, setProgress, startPolling, onError]);
 
   // YOLO 完成：顯示標註影片、解鎖（失敗時也要解鎖）
+  const lastShownVideoRef = useRef<string>("");
   useEffect(() => {
     if (analysisCompleted && yoloVideoUrl) {
+      if (lastShownVideoRef.current !== yoloVideoUrl) {
+      lastShownVideoRef.current = yoloVideoUrl;
       showVideo(yoloVideoUrl);
+      }
       setStatusText("YOLO 分析完成");
       setYoloRunning(false);
       return;

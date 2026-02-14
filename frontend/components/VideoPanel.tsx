@@ -1,7 +1,7 @@
 // components/VideoPanel.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { UploadMeta } from "@/hooks/useVideoUpload";
 import { PipelineStatus, useVideoPanelController } from "@/hooks/useVideoPanelController";
 
@@ -35,12 +35,15 @@ export default function VideoPanel({
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
 
   // helper：顯示影片（本地 / 遠端）
-  function showVideo(src: string) {
+  const lastSrcRef = useRef<string>("");
+  const showVideo = useCallback((src: string) => {
     const v = videoRef.current;
     if (!v) return;
+    if (lastSrcRef.current === src && v.src) return;
+    lastSrcRef.current = src;
     v.src = src;
     v.style.display = "block";
-  }
+  }, []);
 
   // ===== controller hook =====
   const {
