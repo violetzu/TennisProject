@@ -19,3 +19,13 @@ VLLM_API_KEY = os.getenv("VLLM_API_KEY", None)
 
 # 後端給 VLLM 的影片 URL 的 domain，VLLM 會用這個 domain + /videos/xxx.mp4 來存取影片
 VIDEO_URL_DOMAIN = os.getenv("VIDEO_URL_DOMAIN", "http://backend:8000")
+
+
+# Database configuration
+MYSQL_USER = os.getenv("MYSQL_USER", "admin")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "password")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "mysql")
+MYSQL_PORT = os.getenv("MYSQL_PORT", "3306")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "tennis_db")
+
+DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
