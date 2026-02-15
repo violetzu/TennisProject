@@ -21,7 +21,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # token 有效期 1 天
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # 取 token 的方式：Authorization: Bearer <token>
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 # =========================
@@ -77,7 +77,7 @@ def get_current_user(
     return user
 
 
-oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
 
 def get_current_user_optional(
     token: str = Depends(oauth2_scheme_optional),

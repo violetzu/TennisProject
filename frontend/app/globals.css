@@ -617,6 +617,29 @@ body.dark svg {
   filter: saturate(1.05);
 }
 
+/* 主頁霧化 */
+.page-blurred {
+  filter: blur(8px);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Modal 背景遮罩 + 霧化（注意：這是 overlay 本身的 blur，不是 page blur） */
+.auth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.auth-card {
+  width: 420px;
+  padding: 18px;
+}
+
 
 /* 響應式簡單處理 */
 @media (max-width: 960px) {

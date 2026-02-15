@@ -32,8 +32,37 @@ export default function Page() {
     <>
       <header className="header">
         <div className="glass-base header-chip">網球比賽分析助手</div>
-        <div suppressHydrationWarning>
-          <ThemeToggle />
+
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          {!isAuthed ? (
+            <button
+              className="btn btn-green"
+              type="button"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthOpen(true);
+              }}
+            >
+              登入 / 註冊
+            </button>
+          ) : (
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                if (!confirm("確定要登出嗎？")) return;
+                logout();
+                setSessionId(null);
+                setLeftTab("chat");
+              }}
+            >
+              {user?.username ?? "使用者"}
+            </button>
+          )}
+
+          <div suppressHydrationWarning>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
