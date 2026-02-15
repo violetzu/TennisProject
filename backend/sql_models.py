@@ -1,7 +1,25 @@
-from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey, text , JSON, BigInteger, Float
-from sqlalchemy.orm import relationship
-from database import Base
+# sql_models.py
+from __future__ import annotations
+
 from datetime import datetime
+
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    ForeignKey,
+    Text,
+    BigInteger,
+    Float,
+    Index,
+    UniqueConstraint,
+    JSON,
+)
+from sqlalchemy.orm import relationship
+
+from database import Base
+
 
 # ============================================================
 # 使用者（登入帳號）
@@ -10,31 +28,26 @@ from datetime import datetime
 class User(Base):
     __tablename__ = "users"
 
-    # 使用者 ID
     id = Column(Integer, primary_key=True, index=True)
-    # 帳號（唯一）
-    username = Column(String(50), unique=True, index=True, nullable=False)
-    # 密碼雜湊
-    hashed_password = Column(String(255), nullable=False)
-    # 建立時間
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # ---- Relationships ----
 
-    # 此使用者上傳的所有影片
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # ---- Relationships ----
     videos = relationship(
         "VideoAsset",
         back_populates="owner",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
 
-    # 此使用者的分析紀錄
     records = relationship(
         "AnalysisRecord",
         back_populates="owner",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
-    
+
 
 # ============================================================
 # 影片資產（歷史上傳影片）
@@ -43,82 +56,112 @@ class User(Base):
 class VideoAsset(Base):
     __tablename__ = "video_assets"
 
-    # 影片 ID
     id = Column(Integer, primary_key=True, index=True)
-    # 上傳者
+
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    # 原始檔名（顯示用）
+
     video_name = Column(String(255), nullable=False)
-    # 實際存放路徑
     storage_path = Column(String(500), nullable=False)
-    # 副檔名 (.mp4/.mkv...)
     ext = Column(String(10), nullable=False)
-    # 檔案大小(bytes)
-    size_bytes = Column(BigInteger)
-    # 影片長度(秒)
-    duration = Column(Float)
-    # FPS
-    fps = Column(Float)
-    # 總幀數
-    frame_count = Column(Integer)
-    # 上傳時間
-    created_at = Column(DateTime, default=datetime.utcnow)
-    # 軟刪除時間（為 NULL 代表正常）
+
+    size_bytes = Column(BigInteger, nullable=True)
+    duration = Column(Float, nullable=True)
+    fps = Column(Float, nullable=True)
+    frame_count = Column(Integer, nullable=True)
+
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     deleted_at = Column(DateTime, nullable=True)
 
     # ---- Relationships ----
-
-    # 上傳者
     owner = relationship("User", back_populates="videos")
 
-    # 使用此影片的分析紀錄
     records = relationship(
         "AnalysisRecord",
-        back_populates="video"
+        back_populates="video",
+        cascade="all, delete-orphan",
     )
 
 
 # ============================================================
-# 分析紀錄（Pipeline / YOLO 每一次分析）
+# 分析紀錄（每影片唯一：同一影片永遠只有一筆狀態）
+# - pipeline 與 yolo 都寫到同一筆 record，但各自欄位分開
 # ============================================================
 
 class AnalysisRecord(Base):
     __tablename__ = "analysis_records"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "video_id", name="uq_analysis_owner_video"),
 
-    # 紀錄 ID
+        Index("ix_analysis_owner_video_updated", "owner_id", "video_id", "updated_at"),
+        Index("ix_analysis_session", "session_id"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    # 給前端輪詢用的 session_id
-    session_id = Column(String(64), unique=True, index=True)
-    # 所屬使用者
+
+    session_id = Column(String(64), index=True, nullable=False)
+
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    # 對應影片
     video_id = Column(Integer, ForeignKey("video_assets.id"), nullable=False)
 
-    # pipeline 狀態
-    # idle / processing / completed / failed
-    pipeline_status = Column(String(20), default="idle")
+    # =========================
+    # Pipeline 欄位
+    # =========================
+    pipeline_status = Column(String(20), default="idle", nullable=False)   # idle/processing/completed/failed
+    pipeline_progress = Column(Integer, default=0, nullable=False)         # 0-100
+    pipeline_error = Column(String(500), nullable=True)
 
-    # pipeline 進度 (0-100)
-    pipeline_progress = Column(Integer, default=0)
+    world_json_path = Column(String(500), nullable=True)
+    video_json_path = Column(String(500), nullable=True)
 
-    # pipeline 錯誤訊息
-    pipeline_error = Column(String(500))
+    world_data = Column(JSON, nullable=True)
 
-    # 你現在 session_store 裡那包狀態
-    processing_info = Column(JSON, default={})
+    # =========================
+    # YOLO 欄位
+    # =========================
+    yolo_status = Column(String(20), default="idle", nullable=False)       # idle/processing/completed/failed
+    yolo_progress = Column(Integer, default=0, nullable=False)             # 0-100
+    yolo_error = Column(String(500), nullable=True)
+    yolo_video_url = Column(String(500), nullable=True)
 
-    # 建立時間
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    # 更新時間
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
         default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
 
     # ---- Relationships ----
-
     owner = relationship("User", back_populates="records")
-
     video = relationship("VideoAsset", back_populates="records")
+
+    messages = relationship(
+        "AnalysisMessage",
+        back_populates="record",
+        cascade="all, delete-orphan",
+    )
+
+
+# ============================================================
+# 聊天訊息
+# ============================================================
+
+class AnalysisMessage(Base):
+    __tablename__ = "analysis_messages"
+    __table_args__ = (
+        Index("ix_msg_record_created", "analysis_record_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+
+    analysis_record_id = Column(Integer, ForeignKey("analysis_records.id"), nullable=False)
+
+    role = Column(String(20), nullable=False)     # user/assistant/system
+    content = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    record = relationship("AnalysisRecord", back_populates="messages")
