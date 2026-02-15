@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { uploadInChunksSmooth, UploadMeta } from "@/hooks/useVideoUpload";
 import { useYoloStatus } from "@/hooks/useYoloStatus";
+import { authFetch } from "@/lib/authFetch";
 
 export type PipelineStatus = "idle" | "processing" | "failed" | "completed" | string | null;
 
@@ -37,6 +38,8 @@ export function useVideoPanelController({
 
   showVideo,
   onError,
+  setVideoAssetId,
+  onUploaded,
 }: {
   sessionId: string | null;
   setSessionId: (id: string | null) => void;
@@ -59,6 +62,8 @@ export function useVideoPanelController({
   showVideo: (src: string) => void;
 
   onError?: (msg: string) => void;
+  setVideoAssetId?: (v: number | null) => void;
+  onUploaded?: () => void;
 }) {
   // 上傳進度
   const [uploadPct, setUploadPct] = useState(0);
@@ -85,6 +90,7 @@ export function useVideoPanelController({
     setProgress,
     setYoloVideoUrl,
     setAnalysisCompleted,
+    setYoloStatus,
     yoloError,
     yoloStatus,
     setYoloError,
@@ -176,9 +182,11 @@ export function useVideoPanelController({
         setSessionId(data.session_id);
         setFilename(data.filename || file.name);
         setMeta(data.meta || null);
+        setVideoAssetId?.(data.video_asset_id ?? null);
 
         setUploadPct(100);
         setStatusText("影片上傳完成，可預覽或開始分析");
+        onUploaded?.();
 
         // 收起進度條
         if (uploadHideTimer.current) window.clearTimeout(uploadHideTimer.current);
@@ -192,6 +200,7 @@ export function useVideoPanelController({
         setMeta(null);
         setLocalVideoUrl(null);
         setYoloVideoUrl(null);
+        setVideoAssetId?.(null);
       } finally {
         setLocalBusy(false);
       }
@@ -209,6 +218,8 @@ export function useVideoPanelController({
       setYoloError,
       showVideo,
       onError,
+      setVideoAssetId,
+      onUploaded,
     ]
   );
 
@@ -232,7 +243,7 @@ export function useVideoPanelController({
         payload.max_seconds = Math.ceil(dur);
       }
 
-      const res = await fetch("/api/analyze_yolo", {
+      const res = await authFetch("/api/analyze_yolo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -305,7 +316,7 @@ export function useVideoPanelController({
     setStatusText("Pipeline 分析啟動中...");
 
     try {
-      const res = await fetch("/api/analyze", {
+      const res = await authFetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),
@@ -352,6 +363,35 @@ export function useVideoPanelController({
     };
   }, []);
 
+  // ===== 專用重置（保留登入/歷史）=====
+  const hardReset = useCallback(() => {
+    setUploadPct(0);
+    setStatusText("請先上傳影片");
+    setProgress(0);
+    setYoloVideoUrl(null);
+    setAnalysisCompleted(false);
+    setYoloError(null);
+    setYoloStatus("idle");
+    setLocalBusy(false);
+    setYoloRunning(false);
+    setPipelineStarting(false);
+
+    setFilename(null);
+    setMeta(null);
+    setLocalVideoUrl(null);
+    setAnalysisCompleted(false);
+  }, [
+    setStatusText,
+    setProgress,
+    setYoloVideoUrl,
+    setYoloError,
+    setYoloStatus,
+    setFilename,
+    setMeta,
+    setLocalVideoUrl,
+    setAnalysisCompleted,
+  ]);
+
   return {
     // states
     lockAll,
@@ -373,5 +413,16 @@ export function useVideoPanelController({
     startAnalyzeYolo,
     onPipelineButtonClick,
     downloadAnalyzed,
+
+    // expose for載入歷史用
+    startYoloPolling: startPolling,
+    setYoloStatus,
+    setYoloProgress: setProgress,
+    setYoloVideoUrl,
+    setYoloAnalysisCompleted: setAnalysisCompleted,
+    setStatusText,
+    setVideoAssetId,
+
+    hardReset,
   };
 }

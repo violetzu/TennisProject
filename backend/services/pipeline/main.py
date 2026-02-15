@@ -22,9 +22,9 @@ from services.pipeline.court_homography import (
 	save_world_coordinate_json,
 	render_minicourt_video,
 )
-from analysis.ball_speed import update_ball_speed
+from services.pipeline.analysis.ball_speed import update_ball_speed
 # from event.alternating_detector import detect_events_shot_based, ShotDetectorConfig
-from event.alternating_detector import detect_alternating_events, AlternatingDetectorConfig
+from services.pipeline.event.alternating_detector import detect_alternating_events, AlternatingDetectorConfig
 DATA_DIR = os.path.join(BASE_DIR, "data")
 VIDEO_DIR = os.path.join(BASE_DIR, "videos")
 
@@ -140,8 +140,8 @@ def run_pipeline(input_path: str, output_name: str | None = None):
 	print(f"擊球事件數量: {len(contact_events)}")
 	print(f"彈跳事件數量: {len(bounce_events)}")
 
-	actual_minicourt_path = render_minicourt_video(world_frames, minicourt_video_path, fps)
-	print(f"Mini court 影片輸出至: {actual_minicourt_path}")
+	# actual_minicourt_path = render_minicourt_video(world_frames, minicourt_video_path, fps)
+	# print(f"Mini court 影片輸出至: {actual_minicourt_path}")
 
 	# 5. 合成畫面
 	print("繪製輸出影片內容...")
@@ -150,15 +150,15 @@ def run_pipeline(input_path: str, output_name: str | None = None):
 	output_frames = court_line_detector.draw_keypoints_on_video(output_frames, court_keypoints)
 
 	# 6. 輸出影片
-	print(f"輸出影片中: {output_video_path}")
-	actual_output_path = save_video(output_frames, output_video_path, fps=fps)
-	print(f"輸出影片已儲存至: {actual_output_path}")
+	# print(f"輸出影片中: {output_video_path}")
+	# actual_output_path = save_video(output_frames, output_video_path, fps=fps)
+	# print(f"輸出影片已儲存至: {actual_output_path}")
 
 	return {
 		"world_json": world_json_path,
 		"video_json": video_json_path,
-		"output_video": actual_output_path,
-		"minicourt_video": actual_minicourt_path,
+		# "output_video": actual_output_path,
+		# "minicourt_video": actual_minicourt_path,
 	}
 
 

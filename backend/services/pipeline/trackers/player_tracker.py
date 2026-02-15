@@ -11,17 +11,8 @@ from typing import List, Dict
 import numpy as np
 
 from supervision import Detections, BoxAnnotator, ByteTrack
-try:
-    from utils import measure_distance, get_center_of_bbox
-except ModuleNotFoundError:  # allow running this file directly (python trackers/player_tracker.py)
-    import sys
-    from pathlib import Path
 
-    ROOT = Path(__file__).resolve().parents[1]
-    if str(ROOT) not in sys.path:
-        sys.path.append(str(ROOT))
-    from utils import measure_distance, get_center_of_bbox
-# import numpy as np
+from services.pipeline.utils import measure_distance, get_center_of_bbox
 
 # 更穩的 track_id 轉 int：逐層展開直到找到第一個純量
 def safe_track_id(value):

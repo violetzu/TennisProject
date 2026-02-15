@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { authFetch } from "@/lib/authFetch";
 
 export type YoloStatus = "idle" | "processing" | "failed" | "completed";
 
@@ -46,7 +47,7 @@ export function useYoloStatus(sessionId: string | null) {
     if (!sessionId) return;
 
     try {
-      const res = await fetch(`/api/status/${sessionId}`, { cache: "no-store" });
+      const res = await authFetch(`/api/status/${sessionId}`, { cache: "no-store" });
 
       if (res.status === 404) {
         const now = Date.now();
@@ -145,6 +146,7 @@ export function useYoloStatus(sessionId: string | null) {
     setStatusText,
 
     yoloStatus,
+    setYoloStatus,
     yoloError,
     setYoloError,
 

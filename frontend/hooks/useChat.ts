@@ -1,9 +1,20 @@
 // hooks/useChat.ts
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { authFetch } from "@/lib/authFetch";
 
 export type Msg = { role: "user" | "assistant"; text: string };
+export type ChatTurn = { user: string; assistant: string };
+
+function turnsToMessages(turns: ChatTurn[] | undefined | null): Msg[] {
+  const out: Msg[] = [];
+  for (const t of turns || []) {
+    if (t?.user) out.push({ role: "user", text: t.user });
+    if (t?.assistant) out.push({ role: "assistant", text: t.assistant });
+  }
+  return out;
+}
 
 export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -11,14 +22,14 @@ export function useChat(sessionId: string | null) {
 
   const thinkingTimerRef = useRef<number | null>(null);
 
-  function stopThinking() {
+  const stopThinking = useCallback(() => {
     if (thinkingTimerRef.current) {
       window.clearInterval(thinkingTimerRef.current);
       thinkingTimerRef.current = null;
     }
-  }
+  }, []);
 
-  function setLastAssistantText(text: string) {
+  const setLastAssistantText = useCallback((text: string) => {
     setMessages((prev) => {
       const copy = [...prev];
       for (let i = copy.length - 1; i >= 0; i--) {
@@ -29,18 +40,30 @@ export function useChat(sessionId: string | null) {
       }
       return copy;
     });
-  }
+  }, []);
 
-  function startThinking() {
+  const startThinking = useCallback(() => {
     let dots = 1;
     setLastAssistantText("思考中.");
     thinkingTimerRef.current = window.setInterval(() => {
       dots = (dots % 3) + 1;
       setLastAssistantText("思考中" + ".".repeat(dots));
     }, 500);
-  }
+  }, [setLastAssistantText]);
 
-  async function send(text: string) {
+  const hydrate = useCallback((turns: ChatTurn[]) => {
+    stopThinking();
+    setBusy(false);
+    setMessages(turnsToMessages(turns));
+  }, [stopThinking]);
+
+  const reset = useCallback(() => {
+    stopThinking();
+    setBusy(false);
+    setMessages([]);
+  }, [stopThinking]);
+
+  const send = useCallback(async (text: string) => {
     const q = text.trim();
     if (!q) return;
 
@@ -49,14 +72,13 @@ export function useChat(sessionId: string | null) {
       return;
     }
 
-    // 插入 user + 空 assistant bubble
     setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "" }]);
 
     setBusy(true);
     startThinking();
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await authFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, question: q }),
@@ -102,9 +124,13 @@ export function useChat(sessionId: string | null) {
       stopThinking();
       setBusy(false);
     }
-  }
+  }, [sessionId, startThinking, stopThinking, setLastAssistantText]);
 
-  useEffect(() => stopThinking, []);
+  useEffect(() => {
+    reset();
+  }, [sessionId, reset]);
 
-  return { messages, busy, send };
+  useEffect(() => () => stopThinking(), [stopThinking]);
+
+  return { messages, busy, send, hydrate, reset };
 }

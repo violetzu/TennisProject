@@ -2,14 +2,34 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useChat } from "@/hooks/useChat";
+import { useChat, ChatTurn } from "@/hooks/useChat";
 
-export default function ChatPanel({ sessionId }: { sessionId: string | null }) {
-  const { messages, busy, send } = useChat(sessionId);
-
+export default function ChatPanel({
+  sessionId,
+  initialHistory,
+}: {
+  sessionId: string | null;
+  initialHistory?: ChatTurn[]; 
+}) {
+  const { messages, busy, send, hydrate } = useChat(sessionId);
   const [text, setText] = useState("");
 
-  // 你原本有 autoScroll 判斷（near bottom 才自動捲），這裡也做一樣
+  // ✅ 同一個 sessionId 只 hydrate 一次，避免覆蓋使用者剛送出的新訊息
+  const hydratedSidRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    // 同一個 session 不重複 hydrate
+    if (hydratedSidRef.current === sessionId) return;
+
+    // initialHistory 有傳就 hydrate（含空陣列也可以清空）
+    if (initialHistory) {
+      hydrate(initialHistory);
+      hydratedSidRef.current = sessionId;
+    }
+  }, [sessionId, initialHistory, hydrate]);
+
   const chatRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
 
@@ -63,14 +83,14 @@ export default function ChatPanel({ sessionId }: { sessionId: string | null }) {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              onSend();
+              void onSend();
             }
           }}
         />
         <button
           className="send-btn"
           id="sendBtn"
-          onClick={onSend}
+          onClick={() => void onSend()}
           disabled={busy || !sessionId || !text.trim()}
           type="button"
         >

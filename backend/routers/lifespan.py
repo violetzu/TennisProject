@@ -11,7 +11,7 @@ from config import VIDEO_DIR
 # ---------- Settings ----------
 
 CHUNK_MAX_AGE = 60 * 60       # 1 小時，超過代表上傳已死
-VIDEO_MAX_AGE = 2 * 60 * 60   # 2hr，正式影片保留時間
+GUEST_VIDEO_MAX_AGE = 2 * 60 * 60   # 2hr，只清 guest
 CHECK_INTERVAL = 10 * 60      # 清理檢查間隔
 
 
@@ -53,14 +53,16 @@ async def cleanup_loop():
                     if d.is_dir() and is_expired(d, CHUNK_MAX_AGE, now):
                         remove_path(d)
 
-            # videos
-            for f in VIDEO_DIR.iterdir():
-                if (
-                    f.is_file()
-                    and f.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv"}
-                    and is_expired(f, VIDEO_MAX_AGE, now)
-                ):
-                    remove_path(f)
+            # guest videos only
+            guest_root = VIDEO_DIR / "guest"
+            if guest_root.exists():
+                for f in guest_root.iterdir():
+                    if (
+                        f.is_file()
+                        and f.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv"}
+                        and is_expired(f, GUEST_VIDEO_MAX_AGE, now)
+                    ):
+                        remove_path(f)
 
         except asyncio.CancelledError:
             break

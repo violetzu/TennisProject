@@ -1,6 +1,8 @@
+// hooks/usePipelineStatus.ts
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { authFetch } from "@/lib/authFetch";
 
 type PipelineStatus = "idle" | "processing" | "completed" | "failed" | string;
 
@@ -20,7 +22,7 @@ export function usePipelineStatus(sessionId: string | null) {
   const pollOnce = useCallback(async () => {
     if (!sessionId) return;
 
-    const res = await fetch(`/api/status/${sessionId}`, { cache: "no-store" });
+    const res = await authFetch(`/api/status/${sessionId}`, { cache: "no-store" });
     if (!res.ok) throw new Error(await res.text().catch(() => "status failed"));
     const data = await res.json();
 
@@ -68,6 +70,9 @@ export function usePipelineStatus(sessionId: string | null) {
     pipelineError,
     worldData,
     setWorldData, // 需要的話可手動塞
+    setPipelineStatus,
+    setPipelineProgress,
+    setPipelineError,
     startPolling,
     stopPolling,
   };

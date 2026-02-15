@@ -1,6 +1,9 @@
 // hooks/useVideoUpload.ts
 "use client";
 
+import { authFetch } from "@/lib/authFetch";
+import { getToken } from "@/lib/auth";
+
 export type UploadMeta = {
   width?: number;
   height?: number;
@@ -32,6 +35,9 @@ function uploadChunkXHR(args: {
       `&index=${index}&total=${totalChunks}`;
 
     xhr.open("POST", url, true);
+
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
     xhr.upload.onprogress = (evt) => {
       const total = evt.lengthComputable ? evt.total : blob.size;
@@ -113,7 +119,7 @@ export async function uploadInChunksSmooth(
   await Promise.all(Array.from({ length: n }, () => worker()));
 
   // 上傳完成 → 通知後端合併 + 建立 session
-  const completeRes = await fetch("/api/upload_complete", {
+  const completeRes = await authFetch("/api/upload_complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ upload_id: uploadId, filename: file.name }),

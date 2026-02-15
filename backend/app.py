@@ -6,6 +6,7 @@ from database import Base, engine
 from sql_models import User, VideoAsset, AnalysisRecord
 
 from routers.lifespan import lifespan
+from routers.session_router import router as session_router
 from routers.user_router import router as user_router
 from routers.chat_router import router as chat_router
 from routers.video_router import router as video_router
@@ -39,3 +40,4 @@ app.include_router(chat_router)
 app.include_router(user_router)
 app.include_router(video_router)
 app.include_router(analyze_router)
+app.include_router(session_router)
