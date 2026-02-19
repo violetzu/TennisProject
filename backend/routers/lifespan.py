@@ -1,30 +1,37 @@
-import asyncio, time, shutil
+# routers/lifespan.py
+from __future__ import annotations
+
+import asyncio
+import shutil
+import time
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import AsyncGenerator
 
 from fastapi import FastAPI
+
+from config import ALLOWED_EXT, VIDEO_DIR, CHUNK_DIR, GUEST_VIDEO_DIR
+from database import SessionLocal
 from services.analyze.utils import get_yolo_models
-from config import VIDEO_DIR
+from sql_models import AnalysisRecord
+from .utils import safe_under_video_dir
+
+CHUNK_MAX_AGE       = 60 * 60           # 1 小時
+GUEST_MAX_AGE_DAYS  = 7
+GUEST_VIDEO_MAX_AGE = GUEST_MAX_AGE_DAYS * 24 * 60 * 60
+CHECK_INTERVAL      = 10 * 60           # 10 分鐘
 
 
-# ---------- Settings ----------
-
-CHUNK_MAX_AGE = 60 * 60       # 1 小時，超過代表上傳已死
-GUEST_VIDEO_MAX_AGE = 2 * 60 * 60   # 2hr，只清 guest
-CHECK_INTERVAL = 10 * 60      # 清理檢查間隔
-
-
-# ---------- Utils ----------
-
-def is_expired(p: Path, max_age: int, now: float) -> bool:
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _is_expired(p: Path, max_age: int, now: float) -> bool:
     try:
         return now - p.stat().st_mtime > max_age
     except Exception:
         return False
 
 
-def remove_path(p: Path):
+def _remove(p: Path) -> None:
     try:
         if p.is_dir():
             shutil.rmtree(p, ignore_errors=True)
@@ -34,35 +41,63 @@ def remove_path(p: Path):
         pass
 
 
-# ---------- Cleanup Loop ----------
-
-async def cleanup_loop():
-    """
-    背景無限迴圈，定期檢查並刪除過期的影片檔案，避免伺服器儲存空間爆滿。
-    """
+# ── Cleanup loop ──────────────────────────────────────────────────────────────
+async def _cleanup_loop() -> None:
     print(f"[{time.strftime('%H:%M:%S')}] 背景清理任務已啟動。")
+
     while True:
         try:
             await asyncio.sleep(CHECK_INTERVAL)
             now = time.time()
 
-            # chunks
-            chunks_root = VIDEO_DIR / "_chunks"
+            # 1. Chunks
+            chunks_root = CHUNK_DIR
             if chunks_root.exists():
                 for d in chunks_root.iterdir():
-                    if d.is_dir() and is_expired(d, CHUNK_MAX_AGE, now):
-                        remove_path(d)
+                    if d.is_dir() and _is_expired(d, CHUNK_MAX_AGE, now):
+                        _remove(d)
 
-            # guest videos only
-            guest_root = VIDEO_DIR / "guest"
+            # 2. Guest videos
+            guest_root = GUEST_VIDEO_DIR
             if guest_root.exists():
                 for f in guest_root.iterdir():
                     if (
                         f.is_file()
-                        and f.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv"}
-                        and is_expired(f, GUEST_VIDEO_MAX_AGE, now)
+                        and f.suffix.lower() in ALLOWED_EXT
+                        and _is_expired(f, GUEST_VIDEO_MAX_AGE, now)
                     ):
-                        remove_path(f)
+                        _remove(f)
+
+            # 3. DB guest records + related files
+            cutoff = datetime.utcnow() - timedelta(days=GUEST_MAX_AGE_DAYS)
+
+            task_db = SessionLocal()
+            try:
+                old_recs = (
+                    task_db.query(AnalysisRecord)
+                    .filter(
+                        AnalysisRecord.owner_id.is_(None),
+                        AnalysisRecord.created_at < cutoff,
+                    )
+                    .all()
+                )
+                for rec in old_recs:
+                    for path_str in (
+                        rec.raw_video_path,
+                        rec.yolo_video_path,
+                        rec.analysis_json_path,
+                    ):
+                        if not path_str:
+                            continue
+                        p = Path(path_str)
+                        if safe_under_video_dir(p) and p.exists():
+                            _remove(p)
+                    task_db.delete(rec)
+
+                if old_recs:
+                    task_db.commit()
+            finally:
+                task_db.close()
 
         except asyncio.CancelledError:
             break
@@ -70,19 +105,16 @@ async def cleanup_loop():
             await asyncio.sleep(60)
 
 
-# ---------- Lifespan ----------
-
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("[lifespan] loading YOLO models ...")
-
     ball_model, pose_model = get_yolo_models()
     app.state.yolo_ball_model = ball_model
     app.state.yolo_pose_model = pose_model
-
     print("[lifespan] YOLO models loaded")
 
-    cleanup_task = asyncio.create_task(cleanup_loop())
+    cleanup_task = asyncio.create_task(_cleanup_loop())
 
     try:
         yield

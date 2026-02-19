@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { authFetch } from "@/lib/authFetch";
+import { apiFetch } from "@/lib/apiFetch";
 
 export type Msg = { role: "user" | "assistant"; text: string };
 export type ChatTurn = { user: string; assistant: string };
@@ -73,27 +73,25 @@ export function useChat(sessionId: string | null) {
     }
 
     setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "" }]);
-
     setBusy(true);
     startThinking();
 
     try {
-      const res = await authFetch("/api/chat", {
+      // apiFetch：非 2xx 自動 throw，2xx 直接回傳 response（body 未讀，streaming 正常）
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, question: q }),
       });
 
-      if (!res.ok || !res.body) {
+      if (!res.body) {
         stopThinking();
-        const t = await res.text().catch(() => "");
-        setLastAssistantText("錯誤：" + (t || res.statusText));
+        setLastAssistantText("（無回應內容）");
         return;
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-
       let gotChunk = false;
       let full = "";
 
@@ -108,18 +106,17 @@ export function useChat(sessionId: string | null) {
           setLastAssistantText("");
         }
 
-        const chunkText = decoder.decode(value, { stream: true });
-        full += chunkText;
+        full += decoder.decode(value, { stream: true });
         setLastAssistantText(full);
       }
 
       if (!gotChunk) {
         stopThinking();
-        setLastAssistantText("(無回應內容)");
+        setLastAssistantText("（無回應內容）");
       }
     } catch (e: any) {
       stopThinking();
-      setLastAssistantText("連線失敗：" + (e?.message || String(e)));
+      setLastAssistantText("錯誤：" + (e?.message || String(e)));
     } finally {
       stopThinking();
       setBusy(false);

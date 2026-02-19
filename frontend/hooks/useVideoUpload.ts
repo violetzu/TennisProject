@@ -1,21 +1,26 @@
 // hooks/useVideoUpload.ts
 "use client";
 
-import { authFetch } from "@/lib/authFetch";
+import { apiFetch } from "@/lib/apiFetch";
 import { getToken } from "@/lib/auth";
 
 export type UploadMeta = {
   width?: number;
   height?: number;
   fps?: number;
+  frame_count?: number;
   duration?: number;
 };
 
-type UploadCompleteResp = {
+export type UploadCompleteResp = {
   ok: boolean;
   session_id: string;
-  meta?: UploadMeta;
-  filename?: string;
+  analysis_record_id: number;
+  guest_token: string | null;
+  filename: string;
+  meta: UploadMeta;
+  video_url: string;
+  mode: "user" | "guest";
   error?: string;
 };
 
@@ -41,8 +46,7 @@ function uploadChunkXHR(args: {
 
     xhr.upload.onprogress = (evt) => {
       const total = evt.lengthComputable ? evt.total : blob.size;
-      const loaded = evt.loaded || 0;
-      onProgress?.(Math.min(loaded, total), total);
+      onProgress?.(Math.min(evt.loaded, total), total);
     };
 
     xhr.onload = () => {
@@ -70,23 +74,20 @@ export async function uploadInChunksSmooth(
   const totalChunks = Math.ceil(totalSize / chunkSize);
 
   const uploadId =
-    crypto && "randomUUID" in crypto && typeof crypto.randomUUID === "function"
+    typeof crypto?.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}_${Math.random()}`;
 
-  // 每塊目前已上傳 bytes（用來算總進度）
   const uploadedByChunk = new Array<number>(totalChunks).fill(0);
 
   function reportProgress() {
-    const uploadedTotal = uploadedByChunk.reduce((a, b) => a + b, 0);
-    const pct = Math.round((uploadedTotal / totalSize) * 100);
-    onProgress?.(pct);
+    const total = uploadedByChunk.reduce((a, b) => a + b, 0);
+    onProgress?.(Math.round((total / totalSize) * 100));
   }
 
   const tasks = Array.from({ length: totalChunks }, (_, index) => {
     const start = index * chunkSize;
-    const end = Math.min(totalSize, start + chunkSize);
-    const blob = file.slice(start, end);
+    const blob = file.slice(start, Math.min(totalSize, start + chunkSize));
 
     return async () => {
       await uploadChunkXHR({
@@ -99,36 +100,28 @@ export async function uploadInChunksSmooth(
           reportProgress();
         },
       });
-
-      // 完成時保底設滿
       uploadedByChunk[index] = blob.size;
       reportProgress();
     };
   });
 
-  // 併發 worker pool
+  // 並發 worker pool
   let cursor = 0;
   async function worker() {
     while (cursor < tasks.length) {
-      const i = cursor++;
-      await tasks[i]();
+      await tasks[cursor++]();
     }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker())
+  );
 
-  const n = Math.min(concurrency, tasks.length);
-  await Promise.all(Array.from({ length: n }, () => worker()));
-
-  // 上傳完成 → 通知後端合併 + 建立 session
-  const completeRes = await authFetch("/api/upload_complete", {
+  // 上傳完成 → 通知後端合併
+  const res = await apiFetch("/api/upload_complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ upload_id: uploadId, filename: file.name }),
   });
 
-  if (!completeRes.ok) {
-    const text = await completeRes.text().catch(() => "");
-    throw new Error(text || `完成上傳失敗（HTTP ${completeRes.status}）`);
-  }
-
-  return (await completeRes.json()) as UploadCompleteResp;
+  return res.json() as Promise<UploadCompleteResp>;
 }

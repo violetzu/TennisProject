@@ -3,12 +3,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UploadMeta } from "@/hooks/useVideoUpload";
-import { PipelineStatus, useVideoPanelController } from "@/hooks/useVideoPanelController";
-import type { SessionSnapshot } from "@/hooks/useSessionSnapshot";
-import { authFetch } from "@/lib/authFetch";
+import { useVideoPanelController } from "@/hooks/useVideoPanelController";
+import type { AnalysisStatusContext } from "@/hooks/useAnalysisStatus";
+import type { LoadedRecord } from "@/hooks/useCurrentRecord";
 
-function normalizeVideoSrc(maybe: string | null | undefined) {
+function normalizeVideoSrc(maybe: string | null | undefined): string | null {
   if (!maybe) return null;
+  if (maybe.startsWith("blob:")) return maybe;
   if (maybe.startsWith("http://") || maybe.startsWith("https://")) return maybe;
   if (maybe.startsWith("/")) return maybe;
   return "/" + maybe;
@@ -16,171 +17,116 @@ function normalizeVideoSrc(maybe: string | null | undefined) {
 
 export default function VideoPanel({
   sessionId,
-  setSessionId,
-  startPipelinePolling,
-  pipelineStatus,
-  pipelineProgress,
-  pipelineError,
+  analysisRecordId,
+  setFromUpload,
+  updateSessionId,
+  clearAnalysisResult,
+  loadRecord,
+  analysisCtx,
   onShowAnalysis,
-
-  snapshot, 
+  loadedRecord,
   onReset,
   onUploaded,
 }: {
   sessionId: string | null;
-  setSessionId: (id: string | null) => void;
-  startPipelinePolling: () => void;
-
-  pipelineStatus: PipelineStatus;
-  pipelineProgress: number;
-  pipelineError?: string | null;
-
+  analysisRecordId: number | null;
+  setFromUpload: (sid: string, recordId: number) => void;
+  updateSessionId: (sid: string) => void;
+  clearAnalysisResult: (newSessionId: string) => void;
+  loadRecord: (recordId: number) => Promise<any>;
+  analysisCtx: AnalysisStatusContext;
   onShowAnalysis: () => void;
-
-  snapshot?: SessionSnapshot | null; 
+  loadedRecord: LoadedRecord | null;
   onReset?: () => void;
   onUploaded?: () => void;
 }) {
-  // ===== DOM refs =====
   const fileRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
-  // ===== Local UI state =====
   const [filename, setFilename] = useState<string | null>(null);
   const [meta, setMeta] = useState<UploadMeta | null>(null);
-  const [videoAssetId, setVideoAssetId] = useState<number | null>(null);
-
-  // 本地上傳 blob url
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
-
-  // ✅ 遠端載入/歷史載入的影片 url（避免 placeholder 邏輯被 local/yolo 卡住）
   const [remoteVideoUrl, setRemoteVideoUrl] = useState<string | null>(null);
 
-  // helper：顯示影片（本地 / 遠端）
   const lastSrcRef = useRef<string>("");
+
   const showVideo = useCallback((src: string) => {
     const v = videoRef.current;
     if (!v) return;
-    if (lastSrcRef.current === src && v.src) return;
-
-    lastSrcRef.current = src;
-    v.src = src;
+    const normalized = normalizeVideoSrc(src) ?? src;
+    if (lastSrcRef.current === normalized && v.src) return;
+    lastSrcRef.current = normalized;
+    v.src = normalized;
     v.style.display = "block";
   }, []);
 
-  // ===== controller hook =====
   const {
     lockAll,
-    pipelineCompleted,
-    analysisCompleted,
-    yoloVideoUrl,
+    isPipelineCompleted,
+    isYoloCompleted,
     statusText,
-
     videoInfoText,
-
     showRightBar,
     rightBarPct,
     rightBarText,
-
     handleUpload,
     startAnalyzeYolo,
     onPipelineButtonClick,
+    reanalyze,
     downloadAnalyzed,
-
-    startYoloPolling,
-    setYoloStatus,
-    setYoloProgress,
-    setYoloVideoUrl,
-    setYoloAnalysisCompleted,
-    setStatusText,
     hardReset,
   } = useVideoPanelController({
     sessionId,
-    setSessionId,
-    startPipelinePolling,
-    pipelineStatus,
-    pipelineProgress,
-    pipelineError,
+    analysisRecordId,
+    setFromUpload,
+    updateSessionId,
+    clearAnalysisResult,
+    loadRecord,
+    analysisCtx,
     onShowAnalysis,
-
     filename,
     setFilename,
     meta,
     setMeta,
-
     localVideoUrl,
     setLocalVideoUrl,
-
+    loadedRecord,
     showVideo,
-
     onError: (msg) => alert(msg),
-    setVideoAssetId,
     onUploaded,
   });
 
-  // =========================
-  // ✅ Snapshot Hydrate（載入歷史 session 復原）
-  // =========================
+  // ===== Hydrate 歷史紀錄 =====
+  // 用物件 reference 去重，同一個 loadedRecord 物件不重複 hydrate，
+  // 但 reanalyze/onCompleted 後 loadRecord 會產生新物件，可以重新 hydrate
+  const lastHydratedRecordRef = useRef<typeof loadedRecord>(null);
+
   useEffect(() => {
-    if (!snapshot) return;
+    if (!loadedRecord) return;
+    if (lastHydratedRecordRef.current === loadedRecord) return;
+    lastHydratedRecordRef.current = loadedRecord;
 
-    // 1) 還原檔名/影片資訊
-    setFilename(snapshot.filename ?? null);
-    setMeta((snapshot.meta ?? null) as any);
-    setVideoAssetId(snapshot.video_asset_id ?? null);
+    setFilename(loadedRecord.video_name);
+    setMeta(loadedRecord.meta as UploadMeta);
 
-    // 2) 清掉 local blob，避免覆蓋遠端
     if (localVideoUrl) {
-      try {
-        URL.revokeObjectURL(localVideoUrl);
-      } catch {}
+      try { URL.revokeObjectURL(localVideoUrl); } catch {}
     }
     setLocalVideoUrl(null);
 
-    // 3) 決定要播哪個：完成 YOLO → 播 yolo；否則播原始
     const src = normalizeVideoSrc(
-      (snapshot.yolo_status === "completed" ? snapshot.yolo_video_url : null) ||
-        snapshot.video_url
+      loadedRecord.has_yolo ? loadedRecord.yolo_video_url : loadedRecord.video_url
     );
+    if (src) { setRemoteVideoUrl(src); showVideo(src); }
+    else setRemoteVideoUrl(null);
+  }, [loadedRecord]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    if (src) {
-      setRemoteVideoUrl(src);
-      showVideo(src);
-    } else {
-      setRemoteVideoUrl(null);
-    }
-
-    // 4) YOLO 狀態復原 / 輪詢
-    if (snapshot.yolo_status === "completed") {
-      setYoloStatus("completed");
-      setYoloProgress(100);
-      if (snapshot.yolo_video_url) {
-        setYoloVideoUrl(normalizeVideoSrc(snapshot.yolo_video_url));
-      }
-      setYoloAnalysisCompleted(true);
-      setStatusText("YOLO 分析完成（歷史）");
-    } else if (snapshot.yolo_status === "processing") {
-      setYoloStatus("processing");
-      setStatusText(`YOLO 分析中... ${snapshot.yolo_progress ?? 0}%`);
-      startYoloPolling();
-    } else {
-      setYoloStatus("idle");
-      setYoloAnalysisCompleted(false);
-      setYoloProgress(snapshot.yolo_progress ?? 0);
-    }
-  }, [snapshot, showVideo]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 點擊 placeholder 選檔
-  function triggerFileSelect() {
-    if (lockAll || analysisCompleted) return;
-    fileRef.current?.click();
-  }
-
-  // ✅ 上傳前先清掉 remoteVideoUrl（避免載入狀態黏住）
+  // ===== 上傳前清除遠端 URL =====
   const doUpload = useCallback(
     async (file: File) => {
       setRemoteVideoUrl(null);
+      lastHydratedRecordRef.current = null;
       await handleUpload(file);
     },
     [handleUpload]
@@ -190,178 +136,93 @@ export default function VideoPanel({
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
-
-    const onDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      el.classList.add("drop-active");
-    };
-
-    const onDragEnter = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      el.classList.add("drop-active");
-    };
-
-    const onDragLeave = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const add = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); el.classList.add("drop-active"); };
+    const remove = (e: DragEvent) => {
+      e.preventDefault(); e.stopPropagation();
       if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return;
       el.classList.remove("drop-active");
     };
-
-    const onDrop = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const drop = (e: DragEvent) => {
+      e.preventDefault(); e.stopPropagation();
       el.classList.remove("drop-active");
-      if (lockAll || analysisCompleted) return;
-
+      if (lockAll) return;
       const file = e.dataTransfer?.files?.[0];
       if (file) void doUpload(file);
     };
-
-    el.addEventListener("dragover", onDragOver);
-    el.addEventListener("dragenter", onDragEnter);
-    el.addEventListener("dragleave", onDragLeave);
-    el.addEventListener("drop", onDrop);
-
+    el.addEventListener("dragover", add);
+    el.addEventListener("dragenter", add);
+    el.addEventListener("dragleave", remove);
+    el.addEventListener("drop", drop);
     return () => {
-      el.removeEventListener("dragover", onDragOver);
-      el.removeEventListener("dragenter", onDragEnter);
-      el.removeEventListener("dragleave", onDragLeave);
-      el.removeEventListener("drop", onDrop);
+      el.removeEventListener("dragover", add);
+      el.removeEventListener("dragenter", add);
+      el.removeEventListener("dragleave", remove);
+      el.removeEventListener("drop", drop);
     };
-  }, [lockAll, analysisCompleted, doUpload]);
+  }, [lockAll, doUpload]);
 
-  // ===== Reset =====
+  // ===== 重置全部 =====
   function resetAll() {
     hardReset();
+    analysisCtx.reset();
     setRemoteVideoUrl(null);
     lastSrcRef.current = "";
+    lastHydratedRecordRef.current = null;
     const v = videoRef.current;
     if (v) v.src = "";
-    setSessionId(null);
     onReset?.();
   }
 
-  // 重新分析：呼叫 /api/reanalyze 並切換到新 session
-  const reanalyze = useCallback(async () => {
-    if (!videoAssetId) {
-      alert("請先載入或上傳影片");
-      return;
-    }
-    try {
-      const res = await authFetch("/api/reanalyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: videoAssetId, mode: "pipeline" }),
-      });
-      if (!res.ok) throw new Error(await res.text().catch(() => "reanalyze failed"));
-      const data = await res.json();
-      setSessionId(data.session_id);
-      setStatusText("已建立新的重新分析 Session，請啟動 Pipeline");
-      setYoloStatus("idle");
-      setYoloProgress(0);
-      setYoloVideoUrl(null);
-      setYoloAnalysisCompleted(false);
-      setLocalVideoUrl(null);
-      setRemoteVideoUrl(null);
-      setMeta(data.meta || meta);
-      setFilename(data.filename || filename);
-      setVideoAssetId(data.video_asset_id || videoAssetId);
-    } catch (e: any) {
-      alert("重新分析失敗：" + (e?.message || String(e)));
-    }
-  }, [
-    videoAssetId,
-    setSessionId,
-    setStatusText,
-    setYoloStatus,
-    setYoloProgress,
-    setYoloVideoUrl,
-    setYoloAnalysisCompleted,
-    meta,
-    filename,
-    setMeta,
-  ]);
-
-  // 卸載清理 local blob url
+  // ===== 卸載清理 =====
   useEffect(() => {
     return () => {
-      if (localVideoUrl) {
-        try {
-          URL.revokeObjectURL(localVideoUrl);
-        } catch {}
-      }
+      if (localVideoUrl) { try { URL.revokeObjectURL(localVideoUrl); } catch {} }
     };
   }, [localVideoUrl]);
 
-  // placeholder 顯示邏輯（✅ 加上 remoteVideoUrl）
-  const hasAnyVideo = Boolean(localVideoUrl || remoteVideoUrl || yoloVideoUrl);
+  const hasAnyVideo = Boolean(localVideoUrl || remoteVideoUrl || analysisCtx.yoloVideoUrl);
 
   return (
     <>
-      {/* ===== 控制卡 ===== */}
       <div className="glass-base control-card">
         <div className="control-row">
           <input
-            id="file"
-            ref={fileRef}
-            type="file"
-            accept="video/*"
+            id="file" ref={fileRef} type="file" accept="video/*"
             style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void doUpload(f);
-            }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }}
           />
 
           <button
-            className="btn btn-green"
-            id="analyzeBtn"
+            className="btn btn-green" id="analyzeBtn" type="button"
             disabled={lockAll || !sessionId}
-            onClick={analysisCompleted ? downloadAnalyzed : startAnalyzeYolo}
-            type="button"
+            onClick={isYoloCompleted ? downloadAnalyzed : startAnalyzeYolo}
           >
-            {analysisCompleted ? "下載分析後影片" : "YOLO 分析"}
+            {isYoloCompleted ? "下載分析後影片" : "YOLO 分析"}
           </button>
 
           <button
-            className="btn btn-green"
-            type="button"
-            disabled={
-              (!pipelineCompleted && (lockAll || !sessionId)) ||
-              (!sessionId && !pipelineCompleted)
-            }
+            className="btn btn-green" type="button"
+            disabled={!isPipelineCompleted && (lockAll || !sessionId)}
             onClick={onPipelineButtonClick}
           >
-            {pipelineCompleted ? "顯示分析結果" : "Pipeline 分析"}
+            {isPipelineCompleted ? "顯示分析結果" : "Pipeline 分析"}
           </button>
 
           <button
-            className="btn"
-            type="button"
-            disabled={lockAll || !videoAssetId}
-            onClick={reanalyze}
+            className="btn" type="button"
+            disabled={lockAll || !analysisRecordId}
+            onClick={() => void reanalyze()}
           >
             重置分析
           </button>
 
-          <button
-            className="btn"
-            id="resetBtn"
-            onClick={resetAll}
-            disabled={lockAll}
-            type="button"
-          >
+          <button className="btn" id="resetBtn" type="button" disabled={lockAll} onClick={resetAll}>
             重置影片
           </button>
 
-          {/* 右側：共用進度條 */}
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
             <div
-              className="progress-bar-wrap"
-              id="progressContainer"
+              className="progress-bar-wrap" id="progressContainer"
               style={{ display: showRightBar ? "block" : "none" }}
             >
               <div className="progress-bar" id="progressBar" style={{ width: `${rightBarPct}%` }} />
@@ -369,63 +230,42 @@ export default function VideoPanel({
           </div>
         </div>
 
-        {/* 狀態列：左 status + 右 progress 文字 */}
         <div id="status" style={{ display: "flex", alignItems: "center" }}>
           <span>{statusText}</span>
-
           {showRightBar && (
-            <span
-              id="progressText"
-              style={{
-                marginLeft: "auto",
-                width: 190,
-                textAlign: "right",
-                fontSize: 12,
-                opacity: 0.8,
-              }}
-            >
+            <span id="progressText" style={{ marginLeft: "auto", width: 190, textAlign: "right", fontSize: 12, opacity: 0.8 }}>
               {rightBarText}
             </span>
           )}
         </div>
 
-        {/* 影片資訊 */}
-        <div id="videoInfo" style={{ whiteSpace: "pre-line" }}>
-          {videoInfoText}
-        </div>
+        <div id="videoInfo" style={{ whiteSpace: "pre-line" }}>{videoInfoText}</div>
       </div>
 
-      {/* ===== 影片卡 ===== */}
       <div className="glass-base video-card">
         <div
-          className="video-wrapper"
-          id="dropZone"
-          ref={wrapperRef}
-          onClick={!hasAnyVideo ? triggerFileSelect : undefined}
+          className="video-wrapper" id="dropZone" ref={wrapperRef}
+          onClick={!hasAnyVideo ? () => { if (!lockAll) fileRef.current?.click(); } : undefined}
         >
           <div id="videoPlaceholder" style={{ display: hasAnyVideo ? "none" : "flex" }}>
             <img src="/update.svg" id="uploadIcon" alt="上傳圖示" />
             <div>點擊新增或拖曳影片檔案到此區塊</div>
-
             <button
-              className="vp-upload-btn"
-              id="videoUploadBtn"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                triggerFileSelect();
-              }}
+              className="vp-upload-btn" id="videoUploadBtn" type="button"
+              onClick={(e) => { e.stopPropagation(); if (!lockAll) fileRef.current?.click(); }}
             >
               選擇影片
             </button>
           </div>
 
           <video
-            id="videoPlayer"
-            ref={videoRef}
-            controls
-            onClick={(e) => e.stopPropagation()}
-            style={{ display: hasAnyVideo ? "block" : "none" }}
+            id="videoPlayer" ref={videoRef} controls
+            onClick={(e) => {
+              e.stopPropagation();
+              const v = e.currentTarget;
+              v.paused ? void v.play() : v.pause();
+            }}
+            style={{ display: hasAnyVideo ? "block" : "none", cursor: "pointer" }}
           />
 
           <canvas id="overlay" />

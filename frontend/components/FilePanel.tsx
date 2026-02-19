@@ -2,17 +2,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { authFetch } from "@/lib/authFetch";
+import { apiFetch } from "@/lib/apiFetch";
 
 type VideoItem = {
   id: number;
   video_name: string;
   size_bytes?: number | null;
   created_at: string;
-  has_running_session: boolean;
-  last_session_id?: string | null;
-  last_pipeline_status?: string | null;
-  last_updated_at?: string | null;
+  updated_at: string;
+  analysis_json_path?: string | null;
+  yolo_video_path?: string | null;
 };
 
 function fmtBytes(n?: number | null) {
@@ -20,19 +19,24 @@ function fmtBytes(n?: number | null) {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let v = n;
   let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function statusLabel(item: VideoItem) {
+  if (item.yolo_video_path && item.analysis_json_path) return "✅ YOLO + Pipeline 完成";
+  if (item.yolo_video_path) return "🎬 YOLO 完成";
+  if (item.analysis_json_path) return "📊 Pipeline 完成";
+  return "⬜ 未分析";
+}
+
 export default function FilePanel({
-  onLoadedSession,
+  onLoadRecord,
   reloadKey,
 }: {
-  onLoadedSession: (sessionId: string) => void;
-  reloadKey?: number; // 外部觸發重新抓取歷史列表（上傳/重置後）
+  /** 點選「載入」後，以 analysis_record_id 通知外層 */
+  onLoadRecord: (analysisRecordId: number) => void;
+  reloadKey?: number;
 }) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -42,11 +46,10 @@ export default function FilePanel({
     setErr(null);
     setBusy(true);
     try {
-      const res = await authFetch("/api/videolist", {
+      const res = await apiFetch("/api/videolist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      if (!res.ok) throw new Error(await res.text().catch(() => "videolist failed"));
       const data = await res.json();
       setItems(data?.videos ?? []);
     } catch (e: any) {
@@ -60,71 +63,26 @@ export default function FilePanel({
     void refresh();
   }, [refresh, reloadKey]);
 
-  const loadVideo = useCallback(
-    async (videoId: number) => {
+  const deleteVideo = useCallback(
+    async (id: number) => {
+      if (!confirm("確定要刪除這部影片嗎？")) return;
       setErr(null);
       setBusy(true);
       try {
-        const res = await authFetch("/api/load_video", {
+        await apiFetch("/api/delete_video", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_id: videoId }),
+          body: JSON.stringify({ analysis_record_id: id }),
         });
-        if (!res.ok) throw new Error(await res.text().catch(() => "load_video failed"));
-        const data = await res.json();
-        if (!data?.session_id) throw new Error("缺少 session_id");
-        onLoadedSession(data.session_id);
+        await refresh();
       } catch (e: any) {
         setErr(e?.message || String(e));
       } finally {
         setBusy(false);
       }
     },
-    [onLoadedSession]
+    [refresh]
   );
-
-  const reanalyze = useCallback(
-    async (videoId: number) => {
-      setErr(null);
-      setBusy(true);
-      try {
-        const res = await authFetch("/api/reanalyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ video_id: videoId, mode: "pipeline" }),
-        });
-        if (!res.ok) throw new Error(await res.text().catch(() => "reanalyze failed"));
-        const data = await res.json();
-        if (!data?.session_id) throw new Error("缺少 session_id");
-        onLoadedSession(data.session_id);
-      } catch (e: any) {
-        setErr(e?.message || String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [onLoadedSession]
-  );
-
-  const deleteVideo = useCallback(async (videoId: number) => {
-    if (!confirm("確定要刪除這部影片嗎？")) return;
-
-    setErr(null);
-    setBusy(true);
-    try {
-      const res = await authFetch("/api/delete_video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_id: videoId }),
-      });
-      if (!res.ok) throw new Error(await res.text().catch(() => "delete_video failed"));
-      await refresh();
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh]);
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -153,17 +111,26 @@ export default function FilePanel({
               </div>
             </div>
 
-            <div style={{ fontSize: 12, opacity: 0.85, display: "flex", gap: 10 }}>
-              <span>最後狀態：{v.last_pipeline_status ?? "-"}</span>
-              {v.has_running_session && <span style={{ color: "#7ee787" }}>（分析中）</span>}
+            <div style={{ fontSize: 12, opacity: 0.85 }}>
+              {statusLabel(v)}
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-green" type="button" onClick={() => loadVideo(v.id)} disabled={busy}>
+              <button
+                className="btn btn-green"
+                type="button"
+                disabled={busy}
+                onClick={() => onLoadRecord(v.id)}
+              >
                 載入
               </button>
 
-              <button className="btn" type="button" onClick={() => deleteVideo(v.id)} disabled={busy || v.has_running_session}>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy}
+                onClick={() => deleteVideo(v.id)}
+              >
                 刪除
               </button>
             </div>

@@ -1,4 +1,4 @@
-# main.py
+# backend/services/pipeline/main.py
 import argparse
 import json
 import os
@@ -50,8 +50,8 @@ def run_pipeline(input_path: str, output_name: str | None = None):
 	os.makedirs(minicourt_dir, exist_ok=True)
 	os.makedirs(DATA_DIR, exist_ok=True)
 
-	output_video_path = os.path.join(output_video_dir, f"{basename}.mp4")
-	minicourt_video_path = os.path.join(minicourt_dir, f"minicourt_{basename}.mp4")
+	# output_video_path = os.path.join(output_video_dir, f"{basename}.mp4")
+	# minicourt_video_path = os.path.join(minicourt_dir, f"minicourt_{basename}.mp4")
 	video_json_path = os.path.join(DATA_DIR, f"video_info_{basename}.json")
 	world_json_path = os.path.join(DATA_DIR, f"world_info_{basename}.json")
 
@@ -124,7 +124,7 @@ def run_pipeline(input_path: str, output_name: str | None = None):
 	print("計算球速並寫回 JSON...")
 	update_ball_speed(
 		world_json_path=world_json_path,
-		video_json_path=video_json_path,
+		# video_json_path=video_json_path,
 		smoothing_window=5,
 	)
 
@@ -137,17 +137,17 @@ def run_pipeline(input_path: str, output_name: str | None = None):
 		config=cfg,
 		# verbose=True,
 	)
-	print(f"擊球事件數量: {len(contact_events)}")
-	print(f"彈跳事件數量: {len(bounce_events)}")
+	# print(f"擊球事件數量: {len(contact_events)}")
+	# print(f"彈跳事件數量: {len(bounce_events)}")
 
 	# actual_minicourt_path = render_minicourt_video(world_frames, minicourt_video_path, fps)
 	# print(f"Mini court 影片輸出至: {actual_minicourt_path}")
 
 	# 5. 合成畫面
-	print("繪製輸出影片內容...")
-	output_frames = player_tracker.draw_bboxes(video_frames, player_detections)
-	output_frames = ball_tracker.draw_bboxes(output_frames, smooth_ball_positions, detection_mask)
-	output_frames = court_line_detector.draw_keypoints_on_video(output_frames, court_keypoints)
+	# print("繪製輸出影片內容...")
+	# output_frames = player_tracker.draw_bboxes(video_frames, player_detections)
+	# output_frames = ball_tracker.draw_bboxes(output_frames, smooth_ball_positions, detection_mask)
+	# output_frames = court_line_detector.draw_keypoints_on_video(output_frames, court_keypoints)
 
 	# 6. 輸出影片
 	# print(f"輸出影片中: {output_video_path}")
