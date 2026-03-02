@@ -7,6 +7,7 @@ const allowedDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS
 const backend_domain = process.env.BACKEND_DOMAIN || "http://backend:8000";
 
 const nextConfig = {
+  output: 'standalone', // 縮小最終映像
   allowedDevOrigins,
 
   experimental: {
