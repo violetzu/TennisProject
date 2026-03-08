@@ -636,8 +636,69 @@ body.dark svg {
 }
 
 .auth-card {
-  width: 420px;
-  padding: 18px;
+  width: 360px;
+  padding: 24px 22px;
+}
+
+/* ── 通用輸入框 ── */
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border-light);
+  background: rgba(255, 255, 255, 0.55);
+  color: #111827;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+body.dark .input {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--glass-border-dark);
+  color: #f9fafb;
+}
+.input::placeholder {
+  color: rgba(100, 116, 139, 0.8);
+}
+body.dark .input::placeholder {
+  color: rgba(148, 163, 184, 0.6);
+}
+.input:focus {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 密碼欄位（含顯示/隱藏按鈕） ── */
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-wrap .input {
+  padding-right: 40px;
+}
+.input-eye {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+}
+.input-eye:hover {
+  opacity: 1;
+}
+body.dark .input-eye {
+  color: #94a3b8;
 }
 
 
