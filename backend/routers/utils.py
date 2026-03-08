@@ -67,8 +67,9 @@ def get_session_or_404(
 def build_session_snapshot(session_id: str, sess: Dict[str, Any]) -> Dict[str, Any]:
     """回給 /status 的精簡快照，不洩漏內部路徑。"""
     return {
-        "session_id": session_id,
-        "status":     sess.get("status", "idle"),
-        "progress":   sess.get("progress", 0),
-        "error":      sess.get("error"),
+        "session_id":  session_id,
+        "status":      sess.get("status", "idle"),
+        "progress":    sess.get("progress", 0),
+        "error":       sess.get("error"),
+        "transcoding": bool(sess.get("transcoding", False)),
     }

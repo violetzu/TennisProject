@@ -4,12 +4,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,9 @@ from database import get_db
 from services.analyze.utils import get_video_meta
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import assert_under_video_dir, make_session_payload
+
+# decord / vLLM 只支援 H.264 / H.265；AV1、VP9 等需要先轉碼
+_NEED_TRANSCODE_CODECS = {"av1", "vp9", "vp8", "theora"}
 
 router = APIRouter(prefix="/api", tags=["video"])
 
@@ -43,6 +47,81 @@ def _safe_ext(name: str) -> str:
     if ext not in ALLOWED_EXT:
         raise HTTPException(400, "格式錯誤")
     return ext
+
+
+def _transcode_to_h264(src: Path) -> Path:
+    """
+    若影片 codec 屬於 decord/vLLM 不支援的格式（AV1、VP9…），
+    用 ffmpeg 轉成 H.264 MP4 並刪除原始檔，回傳新路徑。
+    若不需要轉碼，直接回傳 src。
+    """
+    meta = get_video_meta(str(src))
+    codec = (meta.get("codec") or "").lower()
+    if codec not in _NEED_TRANSCODE_CODECS:
+        return src
+
+    dst = src.with_suffix(".mp4")
+    if dst == src:
+        dst = src.with_name(src.stem + "_h264.mp4")
+
+    cmd = [
+        "/usr/bin/ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(src),
+        "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+        "-c:a", "aac", "-movflags", "+faststart",
+        str(dst),
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        err = result.stderr.decode(errors="replace")
+        raise RuntimeError(f"轉碼失敗（{codec} → H.264）: {err}")
+
+    src.unlink(missing_ok=True)
+    return dst
+
+
+def _bg_transcode(record_id: int, src: Path, sid: str, session_store: dict) -> None:
+    """
+    背景轉碼任務：完成後更新 DB 的 raw_video_path，
+    並同步更新 session_store 讓 chat 拿到正確路徑。
+    """
+    from database import SessionLocal  # 避免循環 import
+    try:
+        new_path = _transcode_to_h264(src)
+        if new_path == src:
+            return  # 不需要轉碼
+
+        meta = get_video_meta(str(new_path))
+        task_db = SessionLocal()
+        try:
+            r = task_db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
+            if r:
+                r.raw_video_path = str(new_path)
+                r.ext            = new_path.suffix.lstrip(".")
+                r.size_bytes     = new_path.stat().st_size
+                if meta.get("duration"):
+                    r.duration = float(meta["duration"])
+                if meta.get("fps"):
+                    r.fps = float(meta["fps"])
+                if meta.get("frame_count"):
+                    r.frame_count = int(meta["frame_count"])
+                r.updated_at = datetime.utcnow()
+                task_db.commit()
+        finally:
+            task_db.close()
+
+        # 同步更新 in-memory session
+        sess = session_store.get(sid)
+        if sess:
+            sess["raw_video_path"] = str(new_path)
+            sess["transcoding"]    = False
+
+        print(f"[transcode] record_id={record_id} 轉碼完成 → {new_path.name}")
+    except Exception as e:
+        sess = session_store.get(sid)
+        if sess:
+            sess["transcoding"] = False
+        print(f"[transcode] record_id={record_id} 轉碼失敗: {e}")
 
 
 def _write_upload(dst: Path, file: UploadFile) -> None:
@@ -136,6 +215,7 @@ async def upload_chunk(upload_id: str, index: int, chunk: UploadFile = File(...)
 @router.post("/upload_complete")
 async def upload_complete(
     request: Request,
+    background_tasks: BackgroundTasks,
     payload: Dict,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
@@ -208,6 +288,15 @@ async def upload_complete(
         )
         request.app.state.session_store[sid] = sess
 
+        # 若 codec 不支援（AV1/VP9），在背景轉碼後更新 DB 與 session
+        codec = (meta.get("codec") or "").lower()
+        need_transcode = codec in _NEED_TRANSCODE_CODECS
+        if need_transcode:
+            sess["transcoding"] = True
+            background_tasks.add_task(
+                _bg_transcode, rec.id, vpath, sid, request.app.state.session_store
+            )
+
     except Exception as e:
         if vpath.exists():
             vpath.unlink(missing_ok=True)
@@ -224,6 +313,7 @@ async def upload_complete(
         "meta":              meta,
         "video_url":         _rel_video_url(vpath),
         "mode":              "user" if current_user else "guest",
+        "transcoding":       need_transcode,
     }
 
 

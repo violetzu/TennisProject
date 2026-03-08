@@ -1,6 +1,6 @@
 services:
   vllm:
-    image: qwenllm/qwenvl:qwen3vl-cu128
+    image: vllm/vllm-openai:nightly
     profiles:
       - vllm
     gpus: all
@@ -10,10 +10,17 @@ services:
     env_file:
       - .env
     volumes:
-      - ./docker/start_vllm.sh:/start_vllm.sh:ro
-      - ./.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ./data/huggingface:/root/.cache/huggingface
       - ./backend/videos:/vllm-workspace/video
-    command: ["bash", "/start_vllm.sh"]
+    command: >
+      ${APP_VLLM_MODEL}
+      --tensor-parallel-size 1
+      --async-scheduling
+      --max-model-len 24000
+      --gpu-memory-utilization 0.85
+      --host 0.0.0.0
+      --port 8005
+      ${APP_VLLM_API_KEY:+--api-key $APP_VLLM_API_KEY}
     restart: unless-stopped
 
   mysql:

@@ -65,9 +65,9 @@ class AuthConfig:
 
 
 VLLM = VLLMConfig(
-    url     = os.getenv("VLLM_URL",   "http://vllm:8005"),
-    model   = os.getenv("VLLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct"),
-    api_key = os.getenv("VLLM_API_KEY"),
+    url     = os.getenv("APP_VLLM_URL",   "http://vllm:8005"),
+    model   = os.getenv("APP_VLLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct"),
+    api_key = os.getenv("APP_VLLM_API_KEY"),
 )
 
 DB = DBConfig(
