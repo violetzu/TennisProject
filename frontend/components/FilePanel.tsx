@@ -24,9 +24,7 @@ function fmtBytes(n?: number | null) {
 }
 
 function statusLabel(item: VideoItem) {
-  if (item.yolo_video_path && item.analysis_json_path) return "✅ YOLO + Pipeline 完成";
-  if (item.yolo_video_path) return "🎬 YOLO 完成";
-  if (item.analysis_json_path) return "📊 Pipeline 完成";
+  if (item.yolo_video_path || item.analysis_json_path) return "✅ 已分析";
   return "⬜ 未分析";
 }
 
@@ -85,12 +83,12 @@ export default function FilePanel({
   );
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {err && <div style={{ marginLeft: "auto", color: "salmon", fontSize: 12 }}>{err}</div>}
       </div>
 
-      <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ flex: 1, overflowY: "auto", display: "grid", gap: 8, alignContent: "start" }}>
         {items.length === 0 && (
           <div style={{ opacity: 0.8, fontSize: 12 }}>
             尚無歷史影片。登入後上傳影片才會出現在這裡。
@@ -107,7 +105,7 @@ export default function FilePanel({
               <div style={{ fontWeight: 700 }}>{v.video_name}</div>
               <div style={{ marginLeft: "auto", fontSize: 12, opacity: 0.8 }}>
                 {fmtBytes(v.size_bytes)}{" "}
-                {v.created_at ? `· ${new Date(v.created_at).toLocaleString()}` : ""}
+                {v.created_at ? `· ${new Date(v.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}` : ""}
               </div>
             </div>
 

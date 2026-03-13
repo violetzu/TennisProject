@@ -26,8 +26,9 @@ for _d in (VIDEO_DIR, DATA_DIR, CHUNK_DIR, GUEST_VIDEO_DIR):
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 # ── Model paths ───────────────────────────────────────────────────────────────
-BALL_MODEL_PATH = BASE_DIR / "models" / "ball" / "best.pt"
-POSE_MODEL_PATH = BASE_DIR / "models" / "person" / "yolo11n-pose.pt"
+BALL_MODEL_PATH  = BASE_DIR / "models" / "ball"   / "best.pt"
+POSE_MODEL_PATH  = BASE_DIR / "models" / "person" / "yolo26n-pose.pt"
+COURT_MODEL_PATH = BASE_DIR / "models" / "court"  / "YOLO26n-pose-court-best.pt"
 
 # ── Video serving ─────────────────────────────────────────────────────────────
 VIDEO_URL_DOMAIN = os.getenv("VIDEO_URL_DOMAIN", "http://backend:8000")

@@ -1,25 +1,17 @@
 // components/AnalysisPanel.tsx
 "use client";
 
-import React, { useMemo } from "react";
+import React from "react";
 
 const TABS = [
-  { id: "rally", label: "回合分析" },
+  { id: "rally",  label: "回合分析" },
   { id: "player", label: "球員統計" },
-  { id: "depth", label: "深度分析" },
-  { id: "speed", label: "速度統計" },
-  { id: "court", label: "落點圖" },
+  { id: "depth",  label: "站位分析" },
+  { id: "speed",  label: "速度統計" },
+  { id: "court",  label: "落點圖"   },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
-
-// 球場常數 (公尺)
-const COURT = {
-  length: 23.77,
-  width: 10.97,
-  netY: 11.885,
-  serviceLineDistance: 6.4,
-};
 
 function StatCard({
   label,
@@ -41,190 +33,134 @@ function StatCard({
   );
 }
 
-type PlayerSide = "top" | "bottom";
+// ── 各 Tab 元件 ───────────────────────────────────────────────────────────────
 
-function asPlayerSide(v: any): PlayerSide {
-  return v === "top" ? "top" : "bottom"; 
-}
+function RallyRow({ r }: { r: any }) {
+  const [open, setOpen] = React.useState(false);
+  const shots: any[] = r.shots ?? [];
 
-function useRallyAnalysis(worldData: any) {
-  return useMemo(() => {
-    if (!worldData?.frames) return null;
-
-    const frames = worldData.frames as any[];
-    const fps = worldData.metadata?.fps || 30;
-    const gapFrames = Math.floor(2.5 * fps);
-
-    const contacts: any[] = [];
-    for (let i = 0; i < frames.length; i++) {
-      const f = frames[i];
-      const events = f?.events || [];
-      for (const e of events) {
-        if (e?.type === "racket_contact") {
-          const ballWorld = f?.ball?.world;
-          let postSpeed: number | null = null;
-          for (let j = i; j < Math.min(i + 5, frames.length); j++) {
-            const s = frames[j]?.ball?.speed;
-            if (typeof s === "number" && s > 0 && (postSpeed === null || s > postSpeed)) {
-              postSpeed = s;
-            }
-          }
-          contacts.push({
-            frameIndex: i,
-            time: typeof f.time === "number" ? f.time : i / fps,
-            x: ballWorld?.[0],
-            y: ballWorld?.[1],
-            speed: postSpeed,
-            player: (typeof ballWorld?.[1] === "number" && ballWorld[1] < COURT.netY ? "top" : "bottom") as PlayerSide,
-          });
-        }
-      }
-    }
-
-    const rallies: any[] = [];
-    let currentRally: any[] = [];
-    for (const contact of contacts) {
-      if (currentRally.length > 0) {
-        const lastContact = currentRally[currentRally.length - 1];
-        if (contact.frameIndex - lastContact.frameIndex > gapFrames) {
-          rallies.push(finalizeRally(rallies.length + 1, currentRally, frames, fps));
-          currentRally = [];
-        }
-      }
-      currentRally.push(contact);
-    }
-    if (currentRally.length > 0) {
-      rallies.push(finalizeRally(rallies.length + 1, currentRally, frames, fps, true));
-    }
-
-    const playerStats = {
-      top: { shots: 0, serves: 0, winners: 0 },
-      bottom: { shots: 0, serves: 0, winners: 0 },
-    };
-
-    for (const rally of rallies) {
-      if (rally.serve) {
-        const p = asPlayerSide(rally.serve.player);
-        playerStats[p].serves++;
-        playerStats[p].shots++;
-      }
-      for (const shot of rally.shots || []) {
-        playerStats[asPlayerSide(shot.player)].shots++;
-      }
-      if (rally.winner) {
-        const winnerPlayer = rally.winner.y < COURT.netY ? "bottom" : "top";
-        playerStats[winnerPlayer].winners++;
-      }
-    }
-
-    let front = 0,
-      mid = 0,
-      back = 0;
-    for (const c of contacts) {
-      if (typeof c.y === "number") {
-        const distFromNet = Math.abs(c.y - COURT.netY);
-        if (distFromNet < 4) front++;
-        else if (distFromNet < 8) mid++;
-        else back++;
-      }
-    }
-
-    const speeds = contacts.filter((c) => typeof c.speed === "number").map((c) => c.speed as number);
-
-    return {
-      rallies,
-      contacts,
-      playerStats,
-      depth: { front, mid, back, total: front + mid + back },
-      speeds,
-      totalShots: contacts.length,
-      duration: frames.length / fps,
-    };
-  }, [worldData]);
-}
-
-function finalizeRally(id: number, contacts: any[], frames: any[], fps: number, isLast = false) {
-  const serve = contacts[0];
-  const shots = contacts.slice(1);
-  const lastContact = contacts[contacts.length - 1];
-
-  let winner: any = null;
-  const searchEnd = isLast ? frames.length : Math.min(lastContact.frameIndex + 90, frames.length);
-  const speeds: { frame: number; speed: number }[] = [];
-  for (let i = lastContact.frameIndex; i < searchEnd; i++) {
-    const s = frames[i]?.ball?.speed || 0;
-    speeds.push({ frame: i, speed: typeof s === "number" ? s : 0 });
-  }
-
-  if (speeds.length >= 5) {
-    for (let j = 2; j < speeds.length - 2; j++) {
-      if (speeds[j].speed < speeds[j - 1].speed && speeds[j].speed < speeds[j + 1].speed) {
-        if (speeds[j + 1].speed < speeds[j + 2].speed || speeds[j + 1].speed > speeds[j].speed * 1.1) {
-          const fi = speeds[j].frame;
-          const world = frames[fi]?.ball?.world;
-          if (world) {
-            winner = { frame: fi, x: world[0], y: world[1] };
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  return {
-    id,
-    serve,
-    shots,
-    winner,
-    shotCount: contacts.length,
-    startTime: serve.time,
-    endTime: lastContact.time,
+  const shotTypeLabel: Record<string, string> = {
+    serve: "發球", overhead: "高壓", swing: "揮拍", unknown: "未知",
   };
+
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.03)",
+        borderRadius: "6px",
+        marginBottom: "6px",
+        fontSize: "12px",
+        overflow: "hidden",
+      }}
+    >
+      {/* 回合標題列（可點擊展開） */}
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{
+          padding: "8px 12px",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          userSelect: "none",
+        }}
+      >
+        <span style={{ color: "#555", fontSize: "10px" }}>{open ? "▼" : "▶"}</span>
+        <strong>回合 {r.id}</strong>
+        <span style={{ marginLeft: "4px", color: "#aaa" }}>
+          {r.shot_count} 擊 | {r.start_time_sec?.toFixed(1)}s – {r.end_time_sec?.toFixed(1)}s
+        </span>
+        <span style={{ color: "#888" }}>
+          發球：{r.server === "top" ? "▲上方" : "▼下方"}
+        </span>
+        {r.outcome?.type === "winner" && (
+          <span style={{ color: "#f44336" }}>★ 勝利球</span>
+        )}
+      </div>
+
+      {/* 展開後逐拍時間點 */}
+      {open && shots.length > 0 && (
+        <div style={{ padding: "4px 12px 10px 28px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+            {shots.map((s: any) => (
+              <div
+                key={s.seq}
+                style={{
+                  padding: "3px 8px",
+                  background: "rgba(255,255,255,0.06)",
+                  borderRadius: "4px",
+                  fontSize: "11px",
+                  color: "#bbb",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span style={{ color: "#666", marginRight: "4px" }}>#{s.seq}</span>
+                <span style={{ color: "#fff" }}>{s.time_sec?.toFixed(2)}s</span>
+                <span style={{ color: s.player === "top" ? "#4FC3F7" : "#FFB74D", marginLeft: "5px" }}>
+                  {s.player === "top" ? "▲" : "▼"}
+                </span>
+                <span style={{ marginLeft: "4px", color: "#999" }}>
+                  {shotTypeLabel[s.shot_type] ?? s.shot_type}
+                </span>
+                {s.speed_kmh != null && (
+                  <span style={{ marginLeft: "5px", color: "#aaa" }}>{s.speed_kmh}km/h</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function RallyTab({ analysis }: { analysis: any }) {
-  if (!analysis) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+function RallyTab({ data }: { data: any }) {
+  if (!data) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+  const { summary, rallies = [] } = data;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
       <div className="stats-grid">
-        <StatCard label="總回合數" value={analysis.rallies.length} color="#4CAF50" />
-        <StatCard label="總擊球數" value={analysis.totalShots} />
-        <StatCard label="勝利球數" value={analysis.rallies.filter((r: any) => r.winner).length} color="#f44336" />
+        <StatCard label="總回合數"   value={summary?.total_rallies}  color="#4CAF50" />
+        <StatCard label="總擊球數"   value={summary?.total_shots} />
+        <StatCard label="勝利球數"   value={summary?.total_winners}  color="#f44336" />
         <StatCard
           label="平均回合長度"
-          value={analysis.rallies.length > 0 ? (analysis.totalShots / analysis.rallies.length).toFixed(1) : "—"}
+          value={summary?.avg_rally_length?.toFixed(1) ?? "—"}
           hint="擊球/回合"
         />
       </div>
 
-      <div style={{ fontSize: "13px", color: "#888", marginTop: "8px" }}>回合詳情</div>
-      <div style={{ maxHeight: "150px", overflowY: "auto" }}>
-        {analysis.rallies.map((rally: any) => (
-          <div
-            key={rally.id}
-            style={{
-              padding: "8px 12px",
-              background: "rgba(255,255,255,0.03)",
-              borderRadius: "6px",
-              marginBottom: "6px",
-              fontSize: "12px",
-            }}
-          >
-            <strong>回合 {rally.id}</strong>
-            <span style={{ marginLeft: "12px", color: "#aaa" }}>
-              {rally.shotCount} 擊 | {rally.startTime.toFixed(1)}s - {rally.endTime.toFixed(1)}s
-            </span>
-            {rally.winner && <span style={{ marginLeft: "8px", color: "#f44336" }}>★ 有勝利球</span>}
-          </div>
-        ))}
+      <div style={{ fontSize: "13px", color: "#888", marginTop: "8px" }}>回合詳情（點擊展開逐拍時間點）</div>
+      <div style={{ maxHeight: "200px", overflowY: "auto" }}>
+        {rallies.map((r: any) => <RallyRow key={r.id} r={r} />)}
       </div>
     </div>
   );
 }
 
-function PlayerTab({ analysis }: { analysis: any }) {
-  if (!analysis) return <div className="file-tree-empty">載入分析數據後顯示</div>;
-  const { top, bottom } = analysis.playerStats;
+function PlayerTab({ data }: { data: any }) {
+  if (!data) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+  const { top, bottom } = data.summary?.players ?? { top: {}, bottom: {} };
+
+  const shotTypeLabel: Record<string, string> = {
+    serve: "發球", overhead: "高壓", swing: "揮拍", unknown: "未知",
+  };
+
+  const renderShotTypes = (st: any) => {
+    if (!st) return null;
+    return (
+      <div style={{ fontSize: "11px", color: "#aaa", marginTop: "6px" }}>
+        {Object.entries(st as Record<string, number>)
+          .filter(([, v]) => v > 0)
+          .map(([k, v]) => (
+            <span key={k} style={{ marginRight: "8px" }}>
+              {shotTypeLabel[k] ?? k}: {v}
+            </span>
+          ))}
+      </div>
+    );
+  };
 
   return (
     <div style={{ display: "flex", gap: "20px" }}>
@@ -233,10 +169,11 @@ function PlayerTab({ analysis }: { analysis: any }) {
           ▲ 上方球員 (遠端)
         </div>
         <div className="stats-grid">
-          <StatCard label="擊球數" value={top.shots} color="#4FC3F7" />
-          <StatCard label="發球數" value={top.serves} />
-          <StatCard label="得分" value={top.winners} color="#4CAF50" />
+          <StatCard label="擊球數" value={top?.shots}   color="#4FC3F7" />
+          <StatCard label="發球數" value={top?.serves} />
+          <StatCard label="得分"   value={top?.winners} color="#4CAF50" />
         </div>
+        {renderShotTypes(top?.shot_types)}
       </div>
 
       <div style={{ flex: 1 }}>
@@ -244,155 +181,269 @@ function PlayerTab({ analysis }: { analysis: any }) {
           ▼ 下方球員 (近端)
         </div>
         <div className="stats-grid">
-          <StatCard label="擊球數" value={bottom.shots} color="#FFB74D" />
-          <StatCard label="發球數" value={bottom.serves} />
-          <StatCard label="得分" value={bottom.winners} color="#4CAF50" />
+          <StatCard label="擊球數" value={bottom?.shots}   color="#FFB74D" />
+          <StatCard label="發球數" value={bottom?.serves} />
+          <StatCard label="得分"   value={bottom?.winners} color="#4CAF50" />
         </div>
+        {renderShotTypes(bottom?.shot_types)}
       </div>
     </div>
   );
 }
 
-function DepthTab({ analysis }: { analysis: any }) {
-  if (!analysis) return <div className="file-tree-empty">載入分析數據後顯示</div>;
-  const { front, mid, back, total } = analysis.depth;
-  const pct = (v: number) => (total > 0 ? `${((v / total) * 100).toFixed(0)}%` : "0%");
+/** 單一球員的站位分佈長條圖 */
+function ZoneBar({
+  label,
+  color,
+  zones,
+}: {
+  label: string;
+  color: string;
+  zones: { net: number; service: number; baseline: number };
+}) {
+  const total = (zones.net ?? 0) + (zones.service ?? 0) + (zones.baseline ?? 0);
+  if (total === 0) return null;
+  const pct = (v: number) => Math.round((v / total) * 100);
+
+  const rows = [
+    { key: "net",      label: "網前",   fill: "#4CAF50", value: zones.net      ?? 0 },
+    { key: "service",  label: "發球區", fill: "#FFC107", value: zones.service  ?? 0 },
+    { key: "baseline", label: "底線",   fill: "#f44336", value: zones.baseline ?? 0 },
+  ];
 
   return (
-    <div className="stats-grid">
-      <StatCard label="網前 (0-4m)" value={front} hint={pct(front)} color="#4CAF50" />
-      <StatCard label="中場 (4-8m)" value={mid} hint={pct(mid)} color="#FFC107" />
-      <StatCard label="後場 (8m+)" value={back} hint={pct(back)} color="#f44336" />
+    <div style={{ flex: 1 }}>
+      <div style={{ fontSize: "13px", fontWeight: "bold", color, marginBottom: "8px" }}>
+        {label}
+      </div>
+      {rows.map(({ key, label: rl, fill, value }) => {
+        const p = pct(value);
+        return (
+          <div key={key} style={{ marginBottom: "6px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between",
+                          fontSize: "11px", color: "#aaa", marginBottom: "2px" }}>
+              <span>{rl}</span>
+              <span>{p}% <span style={{ color: "#666" }}>({value})</span></span>
+            </div>
+            <div style={{ height: "6px", background: "rgba(255,255,255,0.08)",
+                          borderRadius: "3px", overflow: "hidden" }}>
+              <div style={{
+                height: "100%", width: `${p}%`,
+                background: fill, borderRadius: "3px",
+                transition: "width 0.3s",
+              }} />
+            </div>
+          </div>
+        );
+      })}
+
+      {/* 視覺球場縮圖 */}
+      <svg width="100%" viewBox="0 0 100 54" style={{ marginTop: "8px", display: "block" }}>
+        {/* 球場背景 */}
+        <rect x="0" y="0" width="100" height="54" fill="#1a472a" rx="2" />
+        {/* 區域色塊：網前 / 發球 / 底線（只畫自己那半場） */}
+        {label.includes("▲") ? (
+          // 遠端（上半場 y=0~27）
+          <>
+            <rect x="0" y="0"  width="100" height="7.5" fill={`rgba(244,67,54,${0.2 + (pct(zones.baseline ?? 0)/100)*0.5})`} />
+            <rect x="0" y="7.5" width="100" height="12" fill={`rgba(255,193,7,${0.2 + (pct(zones.service ?? 0)/100)*0.5})`} />
+            <rect x="0" y="19.5" width="100" height="7.5" fill={`rgba(76,175,80,${0.2 + (pct(zones.net ?? 0)/100)*0.5})`} />
+          </>
+        ) : (
+          // 近端（下半場 y=27~54）
+          <>
+            <rect x="0" y="27"  width="100" height="7.5" fill={`rgba(76,175,80,${0.2 + (pct(zones.net ?? 0)/100)*0.5})`} />
+            <rect x="0" y="34.5" width="100" height="12" fill={`rgba(255,193,7,${0.2 + (pct(zones.service ?? 0)/100)*0.5})`} />
+            <rect x="0" y="46.5" width="100" height="7.5" fill={`rgba(244,67,54,${0.2 + (pct(zones.baseline ?? 0)/100)*0.5})`} />
+          </>
+        )}
+        {/* 網 */}
+        <line x1="0" y1="27" x2="100" y2="27" stroke="white" strokeWidth="1.5" />
+        {/* 邊框 */}
+        <rect x="0" y="0" width="100" height="54" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="1" rx="2" />
+        {/* 發球線 */}
+        {label.includes("▲")
+          ? <line x1="0" y1="19.5" x2="100" y2="19.5" stroke="rgba(255,255,255,0.5)" strokeWidth="0.7" strokeDasharray="3,2" />
+          : <line x1="0" y1="34.5" x2="100" y2="34.5" stroke="rgba(255,255,255,0.5)" strokeWidth="0.7" strokeDasharray="3,2" />
+        }
+      </svg>
     </div>
   );
 }
 
-function SpeedTab({ analysis }: { analysis: any }) {
-  if (!analysis) return <div className="file-tree-empty">載入分析數據後顯示</div>;
-  const speeds: number[] = analysis.speeds;
+function DepthTab({ data }: { data: any }) {
+  if (!data) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+  const depthData = data.summary?.depth ?? {};
+  const topZones = depthData.top    ?? { net: 0, service: 0, baseline: 0 };
+  const botZones = depthData.bottom ?? { net: 0, service: 0, baseline: 0 };
 
-  if (speeds.length === 0) return <div className="file-tree-empty">未偵測到擊球速度數據</div>;
-
-  const avg = (speeds.reduce((a, b) => a + b, 0) / speeds.length).toFixed(1);
-  const max = Math.max(...speeds).toFixed(1);
-  const min = Math.min(...speeds).toFixed(1);
+  const hasData = (topZones.net + topZones.service + topZones.baseline +
+                   botZones.net + botZones.service + botZones.baseline) > 0;
+  if (!hasData) return <div className="file-tree-empty">未偵測到站位數據</div>;
 
   return (
-    <div className="stats-grid">
-      <StatCard label="平均球速" value={`${avg} m/s`} hint={`${(Number(avg) * 3.6).toFixed(0)} km/h`} />
-      <StatCard label="最高球速" value={`${max} m/s`} hint={`${(Number(max) * 3.6).toFixed(0)} km/h`} color="#f44336" />
-      <StatCard label="最低球速" value={`${min} m/s`} />
-      <StatCard label="擊球數" value={speeds.length} />
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", gap: "20px" }}>
+        <ZoneBar label="▲ 上方球員" color="#4FC3F7" zones={topZones} />
+        <ZoneBar label="▼ 下方球員" color="#FFB74D" zones={botZones} />
+      </div>
+      <div style={{ fontSize: "11px", color: "#555", display: "flex", gap: "12px" }}>
+        <span style={{ color: "#4CAF50" }}>■ 網前</span>
+        <span style={{ color: "#FFC107" }}>■ 發球區</span>
+        <span style={{ color: "#f44336" }}>■ 底線</span>
+      </div>
     </div>
   );
 }
 
-function CourtTab({ analysis }: { analysis: any }) {
-  if (!analysis) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+function SpeedTab({ data }: { data: any }) {
+  if (!data) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+  const speedData = data.summary?.speed ?? {};
+  const all    = speedData.all    ?? {};
+  const serves = speedData.serves ?? {};
+  const rally  = speedData.rally  ?? {};
 
-  const courtWidth = 200;
-  const courtHeight = 400;
-  const scaleX = courtWidth / COURT.width;
-  const scaleY = courtHeight / COURT.length;
+  if (!all.count) return <div className="file-tree-empty">未偵測到擊球速度數據</div>;
 
-  const servePoints = analysis.rallies
-    .filter((r: any) => r.serve && typeof r.serve.x === "number" && typeof r.serve.y === "number")
-    .map((r: any) => ({
-      x: r.serve.x * scaleX,
-      y: r.serve.y * scaleY,
-      player: r.serve.player,
-    }));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div style={{ fontSize: "13px", color: "#888" }}>整體</div>
+      <div className="stats-grid">
+        <StatCard label="平均球速" value={`${all.avg_kmh ?? "—"} km/h`} />
+        <StatCard label="最高球速" value={`${all.max_kmh ?? "—"} km/h`} color="#f44336" />
+        <StatCard label="最低球速" value={`${all.min_kmh ?? "—"} km/h`} />
+        <StatCard label="統計次數" value={all.count} />
+      </div>
 
-  const winnerPoints = analysis.rallies
-    .filter((r: any) => r.winner && typeof r.winner.x === "number" && typeof r.winner.y === "number")
-    .map((r: any) => ({
-      x: r.winner.x * scaleX,
-      y: r.winner.y * scaleY,
-    }));
+      {serves.count > 0 && (
+        <>
+          <div style={{ fontSize: "13px", color: "#888" }}>發球</div>
+          <div className="stats-grid">
+            <StatCard label="平均" value={`${serves.avg_kmh ?? "—"} km/h`} color="#4FC3F7" />
+            <StatCard label="最高" value={`${serves.max_kmh ?? "—"} km/h`} color="#f44336" />
+          </div>
+        </>
+      )}
 
-  const gridCols = 6;
-  const gridRows = 12;
-  const cellWidth = courtWidth / gridCols;
-  const cellHeight = courtHeight / gridRows;
-  const heatmap: number[][] = Array.from({ length: gridRows }, () => Array.from({ length: gridCols }, () => 0));
+      {rally.count > 0 && (
+        <>
+          <div style={{ fontSize: "13px", color: "#888" }}>回合球</div>
+          <div className="stats-grid">
+            <StatCard label="平均" value={`${rally.avg_kmh ?? "—"} km/h`} color="#FFB74D" />
+            <StatCard label="最高" value={`${rally.max_kmh ?? "—"} km/h`} color="#f44336" />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
-  for (const contact of analysis.contacts) {
-    if (typeof contact.x === "number" && typeof contact.y === "number") {
-      const col = Math.min(Math.floor((contact.x * scaleX) / cellWidth), gridCols - 1);
-      const row = Math.min(Math.floor((contact.y * scaleY) / cellHeight), gridRows - 1);
-      if (col >= 0 && row >= 0) heatmap[row][col]++;
+function CourtTab({ data }: { data: any }) {
+  if (!data) return <div className="file-tree-empty">載入分析數據後顯示</div>;
+
+  // 從 heatmap 取資料（新格式）
+  const heatmap = data.heatmap ?? {};
+  const contacts: any[]  = heatmap.contacts ?? [];
+  const bounces: any[]   = heatmap.bounces  ?? [];
+
+  // 發球點：rallies[].shots 中 is_serve === true
+  const servePoints: any[] = (data.rallies ?? []).flatMap((r: any) =>
+    (r.shots ?? [])
+      .filter((s: any) => s.is_serve && s.ball_pos)
+      .map((s: any) => ({ ...s.ball_pos, player: s.player }))
+  );
+
+  // 勝利球落點：rallies[].outcome.winner_pos
+  const winnerPoints: any[] = (data.rallies ?? [])
+    .filter((r: any) => r.outcome?.type === "winner" && r.outcome?.winner_pos)
+    .map((r: any) => r.outcome.winner_pos);
+
+  const W = 200;
+  const H = 400;
+
+  // 熱力圖（6×12 格）
+  const COLS = 6, ROWS = 12;
+  const cellW = W / COLS, cellH = H / ROWS;
+  const heat: number[][] = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  for (const c of contacts) {
+    if (typeof c.x === "number" && typeof c.y === "number") {
+      const col = Math.min(Math.floor(c.x * COLS), COLS - 1);
+      const row = Math.min(Math.floor(c.y * ROWS), ROWS - 1);
+      if (col >= 0 && row >= 0) heat[row][col]++;
     }
   }
-  const maxHeat = Math.max(1, ...heatmap.flat());
+  const maxHeat = Math.max(1, ...heat.flat());
 
-  const getHeatColor = (value: number) => {
-    const intensity = value / maxHeat;
+  const heatColor = (v: number) => {
+    const intensity = v / maxHeat;
     if (intensity === 0) return "transparent";
     if (intensity < 0.5) {
       const g = Math.floor(200 + intensity * 110);
-      return `rgba(76, ${g}, 80, ${0.3 + intensity * 0.4})`;
-    } else {
-      const r = Math.floor(150 + (intensity - 0.5) * 200);
-      const g = Math.floor(200 - (intensity - 0.5) * 150);
-      return `rgba(${r}, ${g}, 50, ${0.4 + intensity * 0.3})`;
+      return `rgba(76,${g},80,${0.3 + intensity * 0.4})`;
     }
+    const r = Math.floor(150 + (intensity - 0.5) * 200);
+    const g = Math.floor(200 - (intensity - 0.5) * 150);
+    return `rgba(${r},${g},50,${0.4 + intensity * 0.3})`;
   };
+
+  // 球場線常數（歸一化）
+  const NET_Y = 0.5;
+  const SRV_T = 0.5 - 0.27;
+  const SRV_B = 0.5 + 0.27;
+  const MID_X = 0.5;
 
   return (
     <div style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}>
-      <svg width={courtWidth} height={courtHeight} style={{ background: "#1a472a", borderRadius: "8px" }}>
-        {heatmap.map((row, ri) =>
-          row.map((value, ci) => (
+      <svg width={W} height={H} style={{ background: "#1a472a", borderRadius: "8px" }}>
+        {/* 熱力圖 */}
+        {heat.map((row, ri) =>
+          row.map((v, ci) => (
             <rect
-              key={`heat-${ri}-${ci}`}
-              x={ci * cellWidth}
-              y={ri * cellHeight}
-              width={cellWidth}
-              height={cellHeight}
-              fill={getHeatColor(value)}
+              key={`h-${ri}-${ci}`}
+              x={ci * cellW} y={ri * cellH}
+              width={cellW} height={cellH}
+              fill={heatColor(v)}
             />
           ))
         )}
 
-        <rect x="0" y="0" width={courtWidth} height={courtHeight} fill="none" stroke="#fff" strokeWidth="2" />
-        <line x1="0" y1={COURT.netY * scaleY} x2={courtWidth} y2={COURT.netY * scaleY} stroke="#fff" strokeWidth="3" />
-        <line x1="0" y1={COURT.serviceLineDistance * scaleY} x2={courtWidth} y2={COURT.serviceLineDistance * scaleY} stroke="#fff" strokeWidth="1" />
-        <line
-          x1="0"
-          y1={(COURT.length - COURT.serviceLineDistance) * scaleY}
-          x2={courtWidth}
-          y2={(COURT.length - COURT.serviceLineDistance) * scaleY}
-          stroke="#fff"
-          strokeWidth="1"
-        />
-        <line
-          x1={courtWidth / 2}
-          y1={COURT.serviceLineDistance * scaleY}
-          x2={courtWidth / 2}
-          y2={(COURT.length - COURT.serviceLineDistance) * scaleY}
-          stroke="#fff"
-          strokeWidth="1"
-        />
+        {/* 球場邊框 */}
+        <rect x="0" y="0" width={W} height={H} fill="none" stroke="#fff" strokeWidth="2" />
+        {/* 網 */}
+        <line x1="0" y1={NET_Y * H} x2={W} y2={NET_Y * H} stroke="#fff" strokeWidth="3" />
+        {/* 發球線（上） */}
+        <line x1="0" y1={SRV_T * H} x2={W} y2={SRV_T * H} stroke="#fff" strokeWidth="1" />
+        {/* 發球線（下） */}
+        <line x1="0" y1={SRV_B * H} x2={W} y2={SRV_B * H} stroke="#fff" strokeWidth="1" />
+        {/* 中線 */}
+        <line x1={MID_X * W} y1={SRV_T * H} x2={MID_X * W} y2={SRV_B * H} stroke="#fff" strokeWidth="1" />
 
-        {servePoints.map((p: any, i: number) => (
+        {/* 落地點（小點） */}
+        {bounces.map((p: any, i: number) => (
           <circle
-            key={`serve-${i}`}
-            cx={p.x}
-            cy={p.y}
-            r="6"
-            fill={p.player === "top" ? "#4FC3F7" : "#FFB74D"}
-            stroke="#fff"
-            strokeWidth="1"
-            opacity="0.9"
+            key={`b-${i}`}
+            cx={p.x * W} cy={p.y * H}
+            r="3"
+            fill="rgba(255,255,100,0.6)"
           />
         ))}
 
+        {/* 發球點 */}
+        {servePoints.map((p: any, i: number) => (
+          <circle
+            key={`s-${i}`}
+            cx={p.x * W} cy={p.y * H}
+            r="6"
+            fill={p.player === "top" ? "#4FC3F7" : "#FFB74D"}
+            stroke="#fff" strokeWidth="1" opacity="0.9"
+          />
+        ))}
+
+        {/* 勝利球落點 */}
         {winnerPoints.map((p: any, i: number) => (
-          <g key={`winner-${i}`}>
-            <circle cx={p.x} cy={p.y} r="8" fill="#f44336" stroke="#fff" strokeWidth="2" />
-            <text x={p.x} y={p.y + 4} textAnchor="middle" fill="#fff" fontSize="10">
-              ★
-            </text>
+          <g key={`w-${i}`}>
+            <circle cx={p.x * W} cy={p.y * H} r="8" fill="#f44336" stroke="#fff" strokeWidth="2" />
+            <text x={p.x * W} y={p.y * H + 4} textAnchor="middle" fill="#fff" fontSize="10">★</text>
           </g>
         ))}
       </svg>
@@ -407,26 +458,25 @@ function CourtTab({ analysis }: { analysis: any }) {
           <span style={{ display: "inline-block", width: "12px", height: "12px", background: "#FFB74D", borderRadius: "50%", marginRight: "6px" }} />
           下方球員發球
         </div>
+        <div style={{ marginBottom: "8px" }}>
+          <span style={{ display: "inline-block", width: "12px", height: "12px", background: "rgba(255,255,100,0.6)", borderRadius: "50%", marginRight: "6px" }} />
+          落地點
+        </div>
         <div style={{ marginBottom: "12px" }}>
           <span style={{ display: "inline-block", width: "12px", height: "12px", background: "#f44336", borderRadius: "50%", marginRight: "6px" }} />
           勝利球落點
         </div>
         <div style={{ marginBottom: "8px", fontWeight: "bold", color: "#fff" }}>熱力圖 (擊球分布)</div>
         <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <span
-            style={{
-              width: "20px",
-              height: "12px",
-              background: "linear-gradient(to right, rgba(76,200,80,0.3), rgba(200,200,50,0.5), rgba(244,67,54,0.7))",
-              borderRadius: "2px",
-            }}
-          />
+          <span style={{ width: "20px", height: "12px", background: "linear-gradient(to right,rgba(76,200,80,0.3),rgba(200,200,50,0.5),rgba(244,67,54,0.7))", borderRadius: "2px" }} />
           <span>低 → 高</span>
         </div>
       </div>
     </div>
   );
 }
+
+// ── 主元件 ────────────────────────────────────────────────────────────────────
 
 export default function AnalysisPanel({
   activeTab,
@@ -437,8 +487,6 @@ export default function AnalysisPanel({
   onTabChange: (id: TabId) => void;
   worldData: any;
 }) {
-  const analysis = useRallyAnalysis(worldData);
-
   return (
     <div className="bottom-panel">
       <div className="panel-tabs">
@@ -454,11 +502,11 @@ export default function AnalysisPanel({
       </div>
 
       <div className="panel-content">
-        {activeTab === "rally" && <RallyTab analysis={analysis} />}
-        {activeTab === "player" && <PlayerTab analysis={analysis} />}
-        {activeTab === "depth" && <DepthTab analysis={analysis} />}
-        {activeTab === "speed" && <SpeedTab analysis={analysis} />}
-        {activeTab === "court" && <CourtTab analysis={analysis} />}
+        {activeTab === "rally"  && <RallyTab  data={worldData} />}
+        {activeTab === "player" && <PlayerTab data={worldData} />}
+        {activeTab === "depth"  && <DepthTab  data={worldData} />}
+        {activeTab === "speed"  && <SpeedTab  data={worldData} />}
+        {activeTab === "court"  && <CourtTab  data={worldData} />}
       </div>
     </div>
   );

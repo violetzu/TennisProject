@@ -13,15 +13,15 @@ import type { AnalysisMode } from "@/hooks/useAnalysisStatus";
 import { useCurrentRecord } from "@/hooks/useCurrentRecord";
 import { useAuth } from "@/components/AuthProvider";
 
-type LeftTab = "chat" | "analysis" | "files";
+type LeftTab     = "chat" | "analysis" | "files";
 type AnalysisTab = "rally" | "player" | "depth" | "speed" | "court";
 
 export default function Page() {
   const { isAuthed, user, logout } = useAuth();
 
-  const [authOpen, setAuthOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<LeftTab>("chat");
-  const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("rally");
+  const [authOpen,      setAuthOpen]      = useState(false);
+  const [leftTab,       setLeftTab]       = useState<LeftTab>("chat");
+  const [analysisTab,   setAnalysisTab]   = useState<AnalysisTab>("rally");
   const [fileReloadKey, setFileReloadKey] = useState(0);
 
   // ===== 目前工作紀錄 =====
@@ -33,14 +33,12 @@ export default function Page() {
     setFromUpload,
     clear: clearRecord,
     clearAnalysisResult,
-    updateSessionId,
   } = useCurrentRecord();
 
-  // ===== worldData 獨立管理，不受 sessionId reset 影響 =====
+  // ===== 分析結果（analysis JSON）=====
   const [worldData, setWorldData] = useState<any>(null);
 
-  // ===== 分析完成後打 analysisrecord 取得最新狀態 =====
-  // 用 ref 存 callback，避免 analysisCtx 循環依賴
+  // ===== 分析完成回調 =====
   const onCompletedRef = useRef<((mode: AnalysisMode) => Promise<void>) | null>(null);
 
   const analysisCtx = useAnalysisStatus(
@@ -48,50 +46,39 @@ export default function Page() {
     useCallback((mode: AnalysisMode) => { void onCompletedRef.current?.(mode); }, [])
   );
 
-  // 每次 render 都更新 ref，確保 closure 拿到最新的 analysisRecordId / loadRecord / analysisCtx
   useEffect(() => {
     onCompletedRef.current = async (mode: AnalysisMode) => {
       if (!analysisRecordId) return;
       try {
         const r = await loadRecord(analysisRecordId);
-        if (mode === "yolo" && r.yolo_video_url) {
-          analysisCtx.setYoloVideoUrl(r.yolo_video_url);
-        } else if (mode === "pipeline" && r.world_data) {
-          setWorldData(r.world_data);
+        if (mode === "combine") {
+          if (r.world_data)     setWorldData(r.world_data);
+          if (r.yolo_video_url) analysisCtx.setYoloVideoUrl(r.yolo_video_url);
         }
-        // 分析完成後刷新歷史列表
         setFileReloadKey((k) => k + 1);
-      } catch {
-        // 靜默失敗
-      }
+      } catch { /* 靜默失敗 */ }
     };
   });
 
   // ===== 載入歷史後 seed 分析狀態 =====
-  // 用 useEffect 確保在 sessionId reset effect 之後才執行
   useEffect(() => {
     if (!loadedRecord) return;
-    if (loadedRecord.has_analysis && loadedRecord.world_data) {
-      setWorldData(loadedRecord.world_data);
-      analysisCtx.seedStatus("pipeline", "completed", 100, null, null);
-    } else if (loadedRecord.has_yolo) {
-      analysisCtx.seedStatus("yolo", "completed", 100, null, loadedRecord.yolo_video_url);
+    // 無論如何都同步 worldData（重置後 world_data 為 null，確保清空）
+    setWorldData(loadedRecord.world_data ?? null);
+    if (loadedRecord.has_analysis || loadedRecord.has_yolo) {
+      analysisCtx.seedStatus("combine", "completed", 100, null, loadedRecord.yolo_video_url);
     }
-    // has_analysis/has_yolo 都是 false（reanalyze 後）→ 維持 idle，不 seed
   }, [loadedRecord]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== FilePanel 載入 =====
-  const handleLoadRecord = useCallback(
-    async (recordId: number) => {
-      try {
-        await loadRecord(recordId);
-        setLeftTab("analysis");
-      } catch (e: any) {
-        alert("載入失敗：" + (e?.message || String(e)));
-      }
-    },
-    [loadRecord]
-  );
+  const handleLoadRecord = useCallback(async (recordId: number) => {
+    try {
+      await loadRecord(recordId);
+      setLeftTab("analysis");
+    } catch (e: any) {
+      alert("載入失敗：" + (e?.message || String(e)));
+    }
+  }, [loadRecord]);
 
   // ===== 完整重置 =====
   const handleReset = useCallback(() => {
@@ -104,9 +91,9 @@ export default function Page() {
 
   const tabs = useMemo(() => {
     const base: { key: LeftTab; label: string; show: boolean }[] = [
-      { key: "chat", label: "對話", show: true },
+      { key: "chat",     label: "對話",     show: true },
       { key: "analysis", label: "分析結果", show: true },
-      { key: "files", label: "歷史影片", show: isAuthed },
+      { key: "files",    label: "歷史影片", show: isAuthed },
     ];
     return base.filter((t) => t.show);
   }, [isAuthed]);
@@ -156,17 +143,17 @@ export default function Page() {
             </div>
 
             <div className="llm-body" style={{ position: "relative" }}>
-              {/* chat - always mounted */}
+              {/* chat */}
               <div style={{ position: leftTab === "chat" ? "relative" : "absolute", inset: leftTab === "chat" ? undefined : 0, width: "100%", height: "100%", visibility: leftTab === "chat" ? "visible" : "hidden", pointerEvents: leftTab === "chat" ? "auto" : "none" }}>
-                <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} />
+                <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} disabled={analysisCtx.transcoding} />
               </div>
 
-              {/* analysis - always mounted */}
+              {/* analysis */}
               <div style={{ position: leftTab === "analysis" ? "relative" : "absolute", inset: leftTab === "analysis" ? undefined : 0, width: "100%", height: "100%", visibility: leftTab === "analysis" ? "visible" : "hidden", pointerEvents: leftTab === "analysis" ? "auto" : "none" }}>
                 <AnalysisPanel activeTab={analysisTab} onTabChange={setAnalysisTab} worldData={worldData} />
               </div>
 
-              {/* files - always mounted when authed */}
+              {/* files */}
               <div style={{ position: leftTab === "files" ? "relative" : "absolute", inset: leftTab === "files" ? undefined : 0, width: "100%", height: "100%", visibility: leftTab === "files" ? "visible" : "hidden", pointerEvents: leftTab === "files" ? "auto" : "none" }}>
                 {isAuthed
                   ? <FilePanel onLoadRecord={handleLoadRecord} reloadKey={fileReloadKey} />
@@ -181,7 +168,6 @@ export default function Page() {
               sessionId={sessionId}
               analysisRecordId={analysisRecordId}
               setFromUpload={setFromUpload}
-              updateSessionId={updateSessionId}
               clearAnalysisResult={clearAnalysisResult}
               loadRecord={loadRecord}
               analysisCtx={analysisCtx}

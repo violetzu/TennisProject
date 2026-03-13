@@ -7,11 +7,14 @@ import { useChat, ChatTurn } from "@/hooks/useChat";
 export default function ChatPanel({
   sessionId,
   initialHistory,
+  disabled,
 }: {
   sessionId: string | null;
-  initialHistory?: ChatTurn[]; 
+  initialHistory?: ChatTurn[];
+  disabled?: boolean;
 }) {
   const { messages, busy, send, hydrate } = useChat(sessionId);
+  const isLocked = busy || disabled;
   const [text, setText] = useState("");
 
   // ✅ 同一個 sessionId 只 hydrate 一次，避免覆蓋使用者剛送出的新訊息
@@ -79,7 +82,7 @@ export default function ChatPanel({
           placeholder="輸入你的問題..."
           value={text}
           onChange={(e) => setText(e.target.value)}
-          disabled={busy}
+          disabled={isLocked}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -91,7 +94,7 @@ export default function ChatPanel({
           className="send-btn"
           id="sendBtn"
           onClick={() => void onSend()}
-          disabled={busy || !sessionId || !text.trim()}
+          disabled={isLocked || !sessionId || !text.trim()}
           type="button"
         >
           送出

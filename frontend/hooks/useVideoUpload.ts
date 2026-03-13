@@ -21,6 +21,7 @@ export type UploadCompleteResp = {
   meta: UploadMeta;
   video_url: string;
   mode: "user" | "guest";
+  transcoding?: boolean;
   error?: string;
 };
 

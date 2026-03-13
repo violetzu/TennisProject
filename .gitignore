@@ -17,3 +17,5 @@ videos/
 backend/data/*
 *.pkl
 /data/*
+backend/services/AN
+backend/test/*

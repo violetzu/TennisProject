@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user, get_current_user_optional
 from config import ALLOWED_EXT, VIDEO_DIR, CHUNK_DIR, GUEST_VIDEO_DIR
 from database import get_db
-from services.analyze.utils import get_video_meta
+from services.utils import get_video_meta
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import assert_under_video_dir, make_session_payload
 
@@ -49,10 +49,15 @@ def _safe_ext(name: str) -> str:
     return ext
 
 
-def _transcode_to_h264(src: Path) -> Path:
+def _transcode_to_h264(
+    src: Path,
+    progress_cb: Optional[callable] = None,
+) -> Path:
     """
     若影片 codec 屬於 decord/vLLM 不支援的格式（AV1、VP9…），
     用 ffmpeg 轉成 H.264 MP4 並刪除原始檔，回傳新路徑。
+    GPU 優先（CUDA decode + h264_nvenc encode），失敗時 fallback 至 CPU。
+    progress_cb(pct: int) 會在轉碼過程中持續回呼（0-99）。
     若不需要轉碼，直接回傳 src。
     """
     meta = get_video_meta(str(src))
@@ -64,17 +69,58 @@ def _transcode_to_h264(src: Path) -> Path:
     if dst == src:
         dst = src.with_name(src.stem + "_h264.mp4")
 
-    cmd = [
+    total_us: float = float(meta.get("duration") or 0) * 1_000_000
+
+    def _run(cmd: list[str]) -> bool:
+        """執行 ffmpeg，解析 -progress pipe:1 輸出以回報進度。回傳是否成功。"""
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                line = line.strip()
+                if line.startswith("out_time_us=") and total_us > 0 and progress_cb:
+                    try:
+                        done_us = float(line.split("=", 1)[1])
+                        pct = min(int(done_us / total_us * 100), 99)
+                        progress_cb(pct)
+                    except ValueError:
+                        pass
+        finally:
+            proc.stdout.close()  # type: ignore[union-attr]
+            proc.wait()
+        return proc.returncode == 0
+
+    progress_flags = ["-progress", "pipe:1", "-nostats"]
+
+    # GPU：CUDA decode + NVENC encode
+    gpu_cmd = [
         "/usr/bin/ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
         "-i", str(src),
-        "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+        *progress_flags,
+        "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
         "-c:a", "aac", "-movflags", "+faststart",
         str(dst),
     ]
-    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    if result.returncode != 0:
-        err = result.stderr.decode(errors="replace")
-        raise RuntimeError(f"轉碼失敗（{codec} → H.264）: {err}")
+    # CPU fallback
+    cpu_cmd = [
+        "/usr/bin/ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(src),
+        *progress_flags,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "aac", "-movflags", "+faststart",
+        str(dst),
+    ]
+
+    for cmd in (gpu_cmd, cpu_cmd):
+        if _run(cmd):
+            break
+    else:
+        raise RuntimeError(f"轉碼失敗（{codec} → H.264）")
 
     src.unlink(missing_ok=True)
     return dst
@@ -86,8 +132,24 @@ def _bg_transcode(record_id: int, src: Path, sid: str, session_store: dict) -> N
     並同步更新 session_store 讓 chat 拿到正確路徑。
     """
     from database import SessionLocal  # 避免循環 import
+    import time as _time
+
+    _tc_start = _time.monotonic()
+
+    def _progress(pct: int) -> None:
+        sess = session_store.get(sid)
+        if not sess:
+            return
+        sess["transcode_progress"] = pct
+        elapsed = _time.monotonic() - _tc_start
+        if pct >= 2 and elapsed > 1:
+            rate = pct / elapsed
+            sess["transcode_eta_seconds"] = round((100 - pct) / rate)
+        else:
+            sess["transcode_eta_seconds"] = None
+
     try:
-        new_path = _transcode_to_h264(src)
+        new_path = _transcode_to_h264(src, progress_cb=_progress)
         if new_path == src:
             return  # 不需要轉碼
 

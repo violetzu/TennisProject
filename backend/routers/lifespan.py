@@ -13,7 +13,7 @@ from fastapi import FastAPI
 
 from config import ALLOWED_EXT, VIDEO_DIR, CHUNK_DIR, GUEST_VIDEO_DIR
 from database import SessionLocal
-from services.analyze.utils import get_yolo_models
+from services.utils import get_yolo_models
 from sql_models import AnalysisRecord
 from .utils import safe_under_video_dir
 
@@ -109,9 +109,10 @@ async def _cleanup_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("[lifespan] loading YOLO models ...")
-    ball_model, pose_model = get_yolo_models()
-    app.state.yolo_ball_model = ball_model
-    app.state.yolo_pose_model = pose_model
+    ball_model, pose_model, court_model = get_yolo_models()
+    app.state.yolo_ball_model  = ball_model
+    app.state.yolo_pose_model  = pose_model
+    app.state.yolo_court_model = court_model
     print("[lifespan] YOLO models loaded")
 
     cleanup_task = asyncio.create_task(_cleanup_loop())

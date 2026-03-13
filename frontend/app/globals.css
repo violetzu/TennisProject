@@ -224,7 +224,6 @@ body.dark .bubble.assistant {
 /* 控制卡 */
 .control-card {
   padding: 14px 16px 10px;
-  height: 190px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -259,7 +258,7 @@ body.dark .bubble.assistant {
 }
 
 .progress-bar-wrap {
-  width: 190px;
+  width: 220px;
   height: 8px;
   background: rgba(148, 163, 184, 0.45);
   border-radius: 4px;
@@ -283,7 +282,6 @@ body.dark .bubble.assistant {
 #videoInfo {
   font-size: 13px;
   line-height: 1.35;
-  white-space: pre-line;
 }
 
 /* 影片卡 */

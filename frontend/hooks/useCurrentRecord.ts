@@ -132,6 +132,7 @@ export function useCurrentRecord() {
             has_yolo: false,
             world_data: null,
             yolo_video_url: null,
+            history: [],
           }
         : null
     );
