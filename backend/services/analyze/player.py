@@ -2,9 +2,8 @@
 球員偵測輔助 (Player Detection Helpers)
 
 包含：
-  - detect_players()          從 Pose result 偵測上下兩側球員中心
-  - build_action_candidates() 產生 ActionRecognizer 所需格式（底部球員）
-  - draw_skeleton()           在幀上繪製骨架
+  - detect_players()  從 Pose result 偵測上下兩側球員中心
+  - draw_skeleton()   在幀上繪製骨架
 
 篩選策略（有場地幾何時）：
   - 左右篩選：球員中心 x 必須在左邊線與右邊線之間
@@ -35,6 +34,20 @@ def _inside_court(cx: float, feet_y: float,
     """
     left_x, right_x = court_side_x_at_y(court_corners, feet_y)
     return (left_x - margin) <= cx <= (right_x + margin)
+
+
+def _passes_filter(x1: float, y1: float, x2: float, y2: float,
+                   kp: list, img_h: int,
+                   court_corners: Optional[np.ndarray]) -> bool:
+    """detect_players / draw_skeleton 共用的候選人過濾條件。"""
+    if (x2 - x1) * (y2 - y1) < 150 or y2 < img_h * 0.05:
+        return False
+    if sum(1 for (_, _, c) in kp if c >= 0.3) < 4:
+        return False
+    cx = (x1 + x2) / 2.0
+    if court_corners is not None and not _inside_court(cx, y2, court_corners):
+        return False
+    return True
 
 
 def detect_players(
@@ -68,67 +81,23 @@ def detect_players(
     upper, lower = [], []
     for box, kp in zip(bx_list, kps_list):
         x1, y1, x2, y2 = box[:4]
-        area = (x2 - x1) * (y2 - y1)
+        if not _passes_filter(x1, y1, x2, y2, kp, img_h, court_corners):
+            continue
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
-        feet_y = y2
-
-        if area < 150 or feet_y < img_h * 0.05:
-            continue
-        if sum(1 for (_, _, c) in kp if c >= 0.3) < 4:
-            continue
-        if court_corners is not None and not _inside_court(cx, feet_y, court_corners):
-            continue
-
-        entry = {"cx": cx, "cy": cy, "area": area}
-        if feet_y < split_y:
+        entry = {"cx": cx, "cy": cy, "area": (x2 - x1) * (y2 - y1)}
+        if y2 < split_y:
             upper.append(entry)
         else:
             lower.append(entry)
 
-    top = (max(upper, key=lambda c: c["area"])["cx"],
-           max(upper, key=lambda c: c["area"])["cy"]) if upper else None
-    bot = (max(lower, key=lambda c: c["area"])["cx"],
-           max(lower, key=lambda c: c["area"])["cy"]) if lower else None
+    _top = max(upper, key=lambda c: c["area"]) if upper else None
+    _bot = max(lower, key=lambda c: c["area"]) if lower else None
+    top = (_top["cx"], _top["cy"]) if _top else None
+    bot = (_bot["cx"], _bot["cy"]) if _bot else None
 
     return top, bot
 
-
-def build_action_candidates(
-    pose_r,
-    img_h: int,
-    net_y: Optional[float] = None,
-) -> List[Dict]:
-    """
-    產生 ActionRecognizer.update_from_candidates() 所需格式。
-
-    條件：
-      - 只選下半場球員（腳底 y > net_y 或退回 img_h*0.55）
-      - 有效 keypoint 數 ≥ 8
-      - 取最大面積的一個球員
-    """
-    if pose_r is None or getattr(pose_r, "keypoints", None) is None:
-        return []
-
-    kps_list = pose_r.keypoints.data.cpu().tolist()
-    bx_list = pose_r.boxes.xyxy.cpu().tolist()
-
-    bottom_threshold = net_y if net_y is not None else img_h * 0.55
-
-    cands = []
-    for box, kp in zip(bx_list, kps_list):
-        x1, y1, x2, y2 = box[:4]
-        area = (x2 - x1) * (y2 - y1)
-        if area < 150 or y2 < img_h * 0.05:
-            continue
-        if sum(1 for (_, _, c) in kp if c >= 0.3) < 8:
-            continue
-        if y2 > bottom_threshold:
-            cands.append({"area": area, "kps": kp})
-
-    if not cands:
-        return []
-    return [max(cands, key=lambda x: x["area"])]
 
 
 def draw_skeleton(frame: np.ndarray, pose_r,
@@ -143,12 +112,7 @@ def draw_skeleton(frame: np.ndarray, pose_r,
 
     for box, kps in zip(bx_list, kps_list):
         x1, y1, x2, y2 = box[:4]
-        if (y2 - y1) * (x2 - x1) < 150 or y2 < img_h * 0.05:
-            continue
-        if sum(1 for (_, _, c) in kps if c >= 0.3) < 4:
-            continue
-        cx = (x1 + x2) / 2.0
-        if court_corners is not None and not _inside_court(cx, y2, court_corners):
+        if not _passes_filter(x1, y1, x2, y2, kps, img_h, court_corners):
             continue
         for (x, y, conf) in kps:
             if conf >= 0.3:

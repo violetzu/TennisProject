@@ -132,7 +132,7 @@ def detect_court_yolo(
         img_corners 順序：[TL, TR, BL, BR]（對應 WORLD_CORNERS）
         kps：全 14 個關鍵點影像座標
     """
-    results = model.predict(source=frame, imgsz=640, conf=COURT_CONF_TH, verbose=False)
+    results = model.predict(source=frame, imgsz=320, conf=COURT_CONF_TH, verbose=False)
     if not results:
         return None
     r = results[0]
@@ -163,9 +163,14 @@ def detect_court_yolo(
 # 繪製
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _inv_H(H: np.ndarray) -> np.ndarray:
+    """計算 Homography 逆矩陣（world→img）。"""
+    return np.linalg.inv(H.astype(np.float64)).astype(np.float32)
+
+
 def compute_net_y(H: np.ndarray) -> float:
     """利用 Homography 逆矩陣將球網世界座標投影到影像，返回球網中心 y 座標。"""
-    H_inv = np.linalg.inv(H.astype(np.float64)).astype(np.float32)
+    H_inv = _inv_H(H)
     net_c = np.array([[[DOUBLES_WIDTH_M / 2.0, _NET_Y_M]]], dtype=np.float32)
     pt = cv2.perspectiveTransform(net_c, H_inv)[0, 0]
     return float(pt[1])
@@ -192,7 +197,7 @@ def draw_court(frame: np.ndarray, img_corners: np.ndarray,
         # ── 遠端發球線 & 中線上端：全部由 H 補算 ────────────────────────
         if H is not None:
             try:
-                H_inv = np.linalg.inv(H.astype(np.float64)).astype(np.float32)
+                H_inv = _inv_H(H)
                 world_extra = np.array([[
                     [_SINGLES_L_X, _SERVICE_Y_FAR],  # 遠端發球線左
                     [_SINGLES_R_X, _SERVICE_Y_FAR],  # 遠端發球線右
@@ -212,7 +217,7 @@ def draw_court(frame: np.ndarray, img_corners: np.ndarray,
     # ── fallback：全部用 H 投影（無 kps 時）──────────────────────────────
     if H is not None:
         try:
-            H_inv = np.linalg.inv(H.astype(np.float64)).astype(np.float32)
+            H_inv = _inv_H(H)
             world_pts = np.array(
                 [[p for seg in _COURT_WORLD_LINES for p in seg]], dtype=np.float32)
             img_pts = cv2.perspectiveTransform(world_pts, H_inv)[0]

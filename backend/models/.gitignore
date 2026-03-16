@@ -1,0 +1,7 @@
+# ignore everything
+*
+
+# allow
+!*.gitignore
+!*_dataset.sh
+!*_train.sh

@@ -92,7 +92,7 @@ export function useChat(sessionId: string | null) {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let gotChunk = false;
+      let outputStarted = false;
       let full = "";
 
       while (true) {
@@ -100,17 +100,20 @@ export function useChat(sessionId: string | null) {
         if (done) break;
         if (!value) continue;
 
-        if (!gotChunk) {
-          gotChunk = true;
+        full += decoder.decode(value, { stream: true });
+        const visible = full.replace(/\u200b/g, "");
+
+        if (!outputStarted && visible) {
+          outputStarted = true;
           stopThinking();
-          setLastAssistantText("");
         }
 
-        full += decoder.decode(value, { stream: true });
-        setLastAssistantText(full);
+        if (outputStarted) {
+          setLastAssistantText(visible);
+        }
       }
 
-      if (!gotChunk) {
+      if (!outputStarted) {
         stopThinking();
         setLastAssistantText("（無回應內容）");
       }

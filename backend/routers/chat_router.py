@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -61,9 +62,73 @@ def _fmt_duration(seconds: float) -> str:
     return f"{s}秒"
 
 
-def _build_messages(sess: dict, question: str, duration: Optional[float]) -> list:
+def _build_analysis_context(json_path: str) -> Optional[str]:
+    """將分析 JSON 壓縮成結構化文字，注入 system prompt 作為 RAG 上下文。"""
+    try:
+        data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    s   = data.get("summary", {})
+    spd = s.get("speed", {})
+    dep = s.get("depth", {}).get("total", {})
+
+    lines = [
+        "=== 影片分析數據（請優先參考此數據回答問題）===",
+        f"回合數：{s.get('total_rallies', '?')}，"
+        f"總擊球：{s.get('total_shots', '?')}，"
+        f"得分球：{s.get('total_winners', '?')}，"
+        f"平均每回合：{s.get('avg_rally_length', '?')} 拍",
+    ]
+
+    for side, label in (("top", "上方球員"), ("bottom", "下方球員")):
+        p  = s.get("players", {}).get(side, {})
+        st = p.get("shot_types", {})
+        lines.append(
+            f"{label}：擊球 {p.get('shots', 0)}（不含發球），"
+            f"發球 {p.get('serves', 0)}，得分 {p.get('winners', 0)}；"
+            f"揮拍 {st.get('swing', 0)}，高壓 {st.get('overhead', 0)}，未知 {st.get('unknown', 0)}"
+        )
+
+    a, sv, rv = spd.get("all", {}), spd.get("serves", {}), spd.get("rally", {})
+    lines.append(
+        f"球速：整體均 {a.get('avg_kmh', '?')} km/h / 最高 {a.get('max_kmh', '?')} km/h；"
+        f"發球均 {sv.get('avg_kmh', '?')} km/h / 最高 {sv.get('max_kmh', '?')} km/h；"
+        f"回合球均 {rv.get('avg_kmh', '?')} km/h"
+    )
+    lines.append(
+        f"站位：底線 {dep.get('baseline', 0)} 次，發球區 {dep.get('service', 0)} 次，網前 {dep.get('net', 0)} 次"
+    )
+
+    for r in data.get("rallies", []):
+        oc      = r.get("outcome", {})
+        wp      = oc.get("winner_player")
+        outcome = f"→ {wp} 得分" if wp else f"→ {oc.get('type', 'unknown')}"
+        shots_s = "→".join(
+            f"{'上' if sh['player'] == 'top' else '下'}"
+            f"{sh.get('shot_type', '?')[:2]}"
+            f"({sh.get('speed_kmh') or '—'}km/h)"
+            for sh in r.get("shots", [])
+        )
+        lines.append(
+            f"[回合{r['id']} {r.get('start_time_sec', 0):.1f}s–{r.get('end_time_sec', 0):.1f}s "
+            f"{r.get('shot_count', 0)}拍] {shots_s} {outcome}"
+        )
+
+    return "\n".join(lines)
+
+
+def _build_messages(
+    sess: dict,
+    question: str,
+    duration: Optional[float],
+    analysis_context: Optional[str] = None,
+) -> list:
     prompt_path = BASE_DIR / "tennis_prompt.txt"
     sys_prompt  = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
+
+    if analysis_context:
+        sys_prompt = sys_prompt.rstrip() + "\n\n" + analysis_context
 
     messages = [{"role": "system", "content": sys_prompt}]
 
@@ -138,12 +203,16 @@ async def chat(
     record_id = sess.get("analysis_record_id") if isinstance(sess.get("analysis_record_id"), int) else None
 
     duration: Optional[float] = None
+    analysis_context: Optional[str] = None
     if record_id:
         rec = db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
-        if rec and rec.duration:
-            duration = float(rec.duration)
+        if rec:
+            if rec.duration:
+                duration = float(rec.duration)
+            if rec.analysis_json_path:
+                analysis_context = _build_analysis_context(rec.analysis_json_path)
 
-    messages = _build_messages(sess, question, duration)
+    messages = _build_messages(sess, question, duration, analysis_context)
 
     payload = {
         "model":             VLLM.model,
@@ -181,8 +250,13 @@ async def chat(
             thinking = True        # True=仍在思考區, False=正式輸出中
             output_started = False # 第一個非空白 token 出現前不 yield
             buf = ""
+            _last_ka = time.monotonic()   # 上次 keep-alive 時間
 
             for raw in _iter_vllm_sse_raw(resp):
+                # thinking 階段每 30s yield 零寬空格防止 Cloudflare 超時
+                if thinking and (time.monotonic() - _last_ka) > 30:
+                    yield "\u200b"
+                    _last_ka = time.monotonic()
                 if not thinking:
                     clean = raw.translate(str.maketrans("", "", REMOVE_CHARS))
                     if not output_started:

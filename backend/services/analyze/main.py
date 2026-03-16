@@ -5,8 +5,8 @@
   - 場地偵測（YOLO Pose, court.py）為前提條件：每幀獨立偵測，conf < 0.8 視為過場
   - 過場幀跳過所有分析，並重置球追蹤狀態（_reset_tracking）
   - 球速換算（analysis.py）只用 Homography 世界座標，無 pixel fallback
-  - ActionRecognizer（CW_action_test.py）偵測揮拍後修正 Kalman 速度估計
   - 靜止假陽性（場地標線 / 帽子）透過 static_blacklist 機制過濾
+  - Phase 3 VLM（Qwen3.5-VL）逐 contact 驗證擊球真偽並分類擊球類型
 
 分析 JSON 格式 → 見 backend/analyze.md
 """
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import subprocess
 import time
 from collections import deque
@@ -24,20 +25,20 @@ from typing import Callable, Deque, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from .CW_action_test import ActionRecognizer
-
 from .ball import (
     RESET_AFTER_MISS, ROI_SIZE, STUCK_DIST_THRESHOLD, STUCK_FRAMES_LIMIT,
     STATIC_BLACKLIST_RADIUS, STATIC_BLACKLIST_TTL,
     WINDOW, extract_xyxy_conf, interpolate_window, is_valid_ball, new_kalman,
 )
 from .court import detect_court_yolo, draw_court, compute_net_y
-from .player import build_action_candidates, detect_players, draw_skeleton
+from .player import detect_players, draw_skeleton
+from config import VLLM
+from .vlm_verify import save_thumbnail, verify_contacts_vlm, verify_rally_winner, THUMB_STRIDE
 from .analysis import (
-    MIN_BALL_SPEED_KMH,
-    assign_player, bounce_zone, classify_shot_type,
+    MIN_BALL_SPEED_KMH, _NET_Y_M,
+    bounce_zone,
     compute_frame_speeds_world,
-    detect_events, find_winner_after, full_interpolate,
+    detect_events, full_interpolate,
     player_court_zone, project_to_world,
     segment_rallies, smooth,
 )
@@ -45,8 +46,6 @@ from .analysis import (
 # ── 繪製開關 ──────────────────────────────────────────────────────────────────
 DRAW_COURT_LINES = True    # 是否在影片上繪製場地線
 
-# ── ActionRecognizer 觸發閾值 ─────────────────────────────────────────────────
-SWING_SCORE_TH = 0.90
 
 
 
@@ -73,7 +72,6 @@ def analyze_combine(
       ├─ 場地偵測（YOLO Pose, conf≥0.8）→ H_img_to_world + kps
       │    └─ 偵測失敗（過場）→ 重置追蹤狀態，跳過 Pose / Ball，寫無標注幀
       ├─ Pose 偵測 → top / bottom 球員位置
-      ├─ ActionRecognizer → 揮拍事件修正 Kalman 速度估計
       └─ Ball 偵測（Kalman + ROI + 靜止黑名單）→ 滑動窗口標注影片
 
     Phase 2  後處理（進度 97–99%）
@@ -81,7 +79,8 @@ def analyze_combine(
       ├─ 事件偵測（contact / bounce）
       └─ 回合切割（時間間隔 + 切鏡邊界）
 
-    Phase 3  統計彙整 → JSON（進度 99–100%）
+    Phase 3  VLM 逐 contact 驗證（進度 72–95%）
+    Phase 4  統計彙整 → JSON（進度 95–100%）
 
     Returns:
         (json_path, annotated_video_path)
@@ -97,6 +96,8 @@ def analyze_combine(
     Path(data_dir).mkdir(parents=True, exist_ok=True)
     out_video_path = vpath.parent / f"{vpath.stem}_analyzed_{job_id}.mp4"
     out_json_path  = Path(data_dir) / f"analysis_{job_id}.json"
+    thumb_dir      = vpath.parent / f"{job_id}_thumbs"
+    thumb_dir.mkdir(exist_ok=True)
 
     # ── FFmpeg 管線 ───────────────────────────────────────────────────────────
     decode_cmd = [
@@ -128,11 +129,10 @@ def analyze_combine(
     n_processed: int = 0                        # 完整分析的幀數（不含過場跳過幀）
 
     _t: Dict[str, float] = {
-        "court":  0.0,   # detect_court_yolo
-        "pose":   0.0,   # pose model + detect_players
-        "action": 0.0,   # ActionRecognizer
-        "ball":   0.0,   # ball model + Kalman
-        "write":  0.0,   # _write_buf_frame
+        "court": 0.0,   # detect_court_yolo
+        "pose":  0.0,   # pose model + detect_players
+        "ball":  0.0,   # ball model + Kalman
+        "write": 0.0,   # _write_buf_frame
     }
 
     tracking_mode = "global"
@@ -141,7 +141,6 @@ def analyze_combine(
     stuck_count = 0
     kalman_inited = False
     kalman = new_kalman()
-    action = ActionRecognizer(fps=fps, img_w=width, img_h=height)
     # 靜止位置黑名單：List[(cx, cy, expire_frame)]
     static_blacklist: List[Tuple[float, float, int]] = []
 
@@ -153,7 +152,6 @@ def analyze_combine(
     all_ball_positions: List[Optional[Tuple[float, float]]] = []
     all_player_top: List[Optional[Tuple[float, float]]] = []
     all_player_bottom: List[Optional[Tuple[float, float]]] = []
-    all_action_events: Dict[int, str] = {}   # frame_idx → 動作名稱（swing / overhead_hit）
     scene_cut_frames: List[int] = []         # 過場幀索引（H 由有效→None 的幀）
 
     idx = 0
@@ -161,14 +159,13 @@ def analyze_combine(
 
     def _reset_tracking() -> None:
         nonlocal tracking_mode, last_center, miss_count, stuck_count
-        nonlocal kalman_inited, kalman, action
+        nonlocal kalman_inited, kalman
         tracking_mode = "global"
         last_center = None
         miss_count = 0
         stuck_count = 0
         kalman_inited = False
         kalman = new_kalman()
-        action = ActionRecognizer(fps=fps, img_w=width, img_h=height)
 
     def _write_buf_frame(
         annotated_frame: np.ndarray,
@@ -201,6 +198,7 @@ def analyze_combine(
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((height, width, 3))
             frame_draw = frame.copy()
 
+
             # ── 場地偵測（每幀獨立，信心 < 0.8 視為過場）───────────────────
             _t0 = time.perf_counter()
             result_try = detect_court_yolo(frame, court_model)
@@ -226,7 +224,7 @@ def analyze_combine(
                 _write_buf_frame(frame_draw, None, court_valid=False)
                 idx += 1
                 if progress_cb and total_frames:
-                    progress_cb(min(int(idx * 97 / total_frames), 96), 100)
+                    progress_cb(min(int(idx * 70 / total_frames), 69), 100)
                 continue
 
             # ── 場地線繪製 ────────────────────────────────────────────────────
@@ -244,21 +242,6 @@ def analyze_combine(
             all_player_bottom.append(bot_pos)
             draw_skeleton(frame_draw, pose_r, height, court_corners)
             _t["pose"] += time.perf_counter() - _t0
-
-            # ── ActionRecognizer ───────────────────────────────────────────────
-            _t0 = time.perf_counter()
-            action_cands = build_action_candidates(pose_r, height, net_y)
-            for ae in action.update_from_candidates(
-                    action_cands, frame_idx=idx, ball_pos=last_center):
-                if ae.name in ("swing", "overhead_hit") and float(ae.score) >= SWING_SCORE_TH:
-                    all_action_events[idx] = ae.name
-                    if kalman_inited:
-                        kalman.statePost[2] *= -0.7
-                        kalman.statePost[3] *= -0.7
-                        kalman.errorCovPost *= 5.0
-                    tracking_mode = "global"
-                    break
-            _t["action"] += time.perf_counter() - _t0
 
             # ── Ball 偵測（Kalman + ROI）──────────────────────────────────────
             _t0 = time.perf_counter()
@@ -347,13 +330,21 @@ def analyze_combine(
                 all_ball_positions.append(None)
             _t["ball"] += time.perf_counter() - _t0
 
+            # ── VLM 縮圖：YOLO 標注後的幀（場地線 + Skeleton + 球框）────────
+            if idx % THUMB_STRIDE == 0:
+                _thumb = frame_draw.copy()
+                if chosen_box:
+                    x1_, y1_, x2_, y2_ = map(int, chosen_box)
+                    cv2.rectangle(_thumb, (x1_, y1_), (x2_, y2_), (0, 255, 255), 2)
+                save_thumbnail(_thumb, thumb_dir, idx)
+
             _t0 = time.perf_counter()
             _write_buf_frame(frame_draw, chosen_box, court_valid=True)
             _t["write"] += time.perf_counter() - _t0
             n_processed += 1
             idx += 1
             if progress_cb and total_frames:
-                progress_cb(min(int(idx * 97 / total_frames), 96), 100)
+                progress_cb(min(int(idx * 70 / total_frames), 69), 100)
 
     finally:
         remaining_ib = interpolate_window(list(ball_box_buf))
@@ -382,11 +373,11 @@ def analyze_combine(
     total_measured = sum(_t.values())
     # court 對所有幀計時；其餘段落只在場地就緒時執行
     _n = {"court": n_all,
-          "pose": n_proc, "action": n_proc, "ball": n_proc, "write": n_proc}
+          "pose": n_proc, "ball": n_proc, "write": n_proc}
     skip_pct = n_skip / n_all * 100
 
     if progress_cb:
-        progress_cb(97, 100)
+        progress_cb(70, 100)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Phase 2：後處理
@@ -400,12 +391,9 @@ def analyze_combine(
     _t2_events = time.perf_counter()
 
     if progress_cb:
-        progress_cb(98, 100)
+        progress_cb(72, 100)
 
-    rally_groups = segment_rallies(contacts_f, fps, scene_cut_frames)
-    _t2_rallies = time.perf_counter()
-
-    pos_interp = full_interpolate(all_ball_positions, max_gap=30)
+    pos_interp = full_interpolate(all_ball_positions, max_gap=30, scene_cut_frames=scene_cut_frames)
     _t2_interp = time.perf_counter()
 
     # 球速：使用最後一次成功的 H 計算世界座標位移
@@ -419,16 +407,51 @@ def analyze_combine(
 
     _t2_total = _t2_speed - _t2_start
 
-    def _get_speed_after(frame_idx: int, look_ahead: int = 5) -> Optional[float]:
+    def _get_speed_after(frame_idx: int, look_ahead: int = 12) -> Optional[float]:
+        # 12 幀 ≈ 200ms@60fps；球在擊打後需數幀才達峰速，5 幀(83ms)常常錯過
         peaks = [smooth_speeds[j] for j in range(
             frame_idx, min(frame_idx + look_ahead, len(smooth_speeds)))
             if smooth_speeds[j] is not None and smooth_speeds[j] >= MIN_BALL_SPEED_KMH]
         return round(max(peaks), 1) if peaks else None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Phase 3：統計彙整 → JSON
+    # Phase 3：VLM 逐 contact 驗證（過濾非擊球事件）
     # ─────────────────────────────────────────────────────────────────────────
     _t3_start = time.perf_counter()
+    vlm_shot_types: Dict[int, str] = {}
+    vlm_winner_results: Dict[int, str] = {}
+    try:
+        contacts_f, _vlm_bounces, vlm_shot_types = verify_contacts_vlm(
+            contacts_f, thumb_dir, fps, VLLM,
+            progress_cb=progress_cb, progress_start=72, progress_end=92,
+        )
+        bounces_f = sorted(set(bounces_f) | set(_vlm_bounces))
+        rally_groups = segment_rallies(contacts_f, fps, scene_cut_frames)
+        # 逐回合判斷勝負（VLM）
+        for _ri, _rc in enumerate(rally_groups):
+            if not _rc:
+                continue
+            _next_f = rally_groups[_ri + 1][0] if _ri + 1 < len(rally_groups) else None
+            vlm_winner_results[_ri] = verify_rally_winner(
+                _rc[-1], _next_f, thumb_dir, fps, VLLM
+            )
+            if progress_cb:
+                pct = 92 + int((_ri + 1) / max(len(rally_groups), 1) * 3)
+                progress_cb(pct, 100)
+    except Exception as _vlm_exc:
+        print(f"[VLM] Phase 3 failed, keeping original contacts: {_vlm_exc}")
+    finally:
+        shutil.rmtree(thumb_dir, ignore_errors=True)
+    _t3_total = time.perf_counter() - _t3_start
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Phase 4：統計彙整 → JSON
+    # ─────────────────────────────────────────────────────────────────────────
+    _t4_start = time.perf_counter()
+
+    def _pn(pos: Tuple[float, float]) -> Tuple[float, float]:
+        """像素座標正規化到 [0,1]，精度 4 位小數。"""
+        return round(pos[0] / width, 4), round(pos[1] / height, 4)
 
     def _speed_stats(speeds: List[float]) -> Dict:
         if not speeds:
@@ -474,33 +497,73 @@ def analyze_combine(
         rally_bounces_f = [b for b in bounces_f
                            if rally_contacts[0] <= b <= r_end_f]
 
-        # 發球者 = 回合第一拍的最近球員
-        serve_ball = pos_interp[rally_contacts[0]] if rally_contacts[0] < len(pos_interp) else None
-        server = (assign_player(rally_contacts[0], serve_ball,
-                                all_player_top, all_player_bottom)
-                  if serve_ball else "bottom")
+        def _court_side_player(fi: int) -> str:
+            """
+            依球在世界座標的 Y 判斷是哪側球員擊球。
+            world_y < _NET_Y_M → 近端（bottom）；> _NET_Y_M → 遠端（top）。
+            無法取得世界座標時以像素 Y 相對圖高中點作 fallback。
+            """
+            bp_ = pos_interp[fi] if fi < len(pos_interp) else None
+            if bp_ is not None and last_valid_H is not None:
+                w = project_to_world(bp_, last_valid_H)
+                if w is not None:
+                    return "bottom" if w[1] < _NET_Y_M else "top"
+            if bp_ is not None:
+                return "bottom" if bp_[1] > height * 0.5 else "top"
+            tp_ = all_player_top[fi] if fi < len(all_player_top) else None
+            bp2 = all_player_bottom[fi] if fi < len(all_player_bottom) else None
+            if tp_ and bp2:
+                return "top" if tp_[1] < bp2[1] else "bottom"
+            return "top" if tp_ else "bottom"
+
+        # 發球者 = 第一拍的場地側（球在哪側半場就是誰發球）
+        server = _court_side_player(rally_contacts[0])
         player_stats[server]["serves"] += 1
+
+        # ── 預處理 1：過濾發球前置動作（拿球、舉球）────────────────────────
+        # 發球回合開頭可能有多個連續「同側球員」事件（拿球→舉球→揮拍）。
+        # 只保留最後一個連續同側事件作為「實際發球揮拍」，其餘略去。
+        # 限制：5 秒內；超出則視為正常回擊，不合併。
+        _MAX_SERVE_BUILDUP_S = 5.0
+        _contacts_work: List[int] = list(rally_contacts)
+
+        _pre_serve_n = 0
+        for _fi in rally_contacts:
+            if ((_fi - rally_contacts[0]) / fps <= _MAX_SERVE_BUILDUP_S
+                    and _court_side_player(_fi) == server):
+                _pre_serve_n += 1
+            else:
+                break
+
+        if _pre_serve_n >= 2:
+            # 捨棄拿球/舉球幀，從實際揮拍開始
+            _contacts_work = list(rally_contacts[_pre_serve_n - 1:])
+            print(f"[SERVE] rally#{rally_idx+1} merged {_pre_serve_n-1} pre-serve event(s), "
+                  f"actual serve f={_contacts_work[0]}({_contacts_work[0]/fps:.2f}s)")
 
         # ── 逐拍建立 shots ────────────────────────────────────────────────
         shots_out: List[Dict] = []
-        for seq, fi in enumerate(rally_contacts):
+        for seq, fi in enumerate(_contacts_work):
             ball_pos = pos_interp[fi] if fi < len(pos_interp) else None
             if ball_pos is None:
                 continue
 
-            player = assign_player(fi, ball_pos, all_player_top, all_player_bottom)
+            # 場地側歸屬：球在哪側轉向就是哪側球員擊球
+            player = _court_side_player(fi)
             is_serve = (seq == 0)
-            shot_type = classify_shot_type(is_serve, all_action_events, fi)
+            shot_type = "serve" if is_serve else vlm_shot_types.get(fi, "unknown")
             speed = _get_speed_after(fi)
 
-            x_norm = round(ball_pos[0] / width, 4)
-            y_norm = round(ball_pos[1] / height, 4)
+            x_norm, y_norm = _pn(ball_pos)
 
             # 球員站位
             plist = all_player_top if player == "top" else all_player_bottom
             ppos = plist[fi] if fi < len(plist) else None
-            player_pos = ({"x": round(ppos[0] / width, 4), "y": round(ppos[1] / height, 4)}
-                          if ppos else None)
+            if ppos:
+                _ppx, _ppy = _pn(ppos)
+                player_pos: Optional[Dict] = {"x": _ppx, "y": _ppy}
+            else:
+                player_pos = None
 
             # 世界座標
             ball_world = project_to_world(ball_pos, last_valid_H) if last_valid_H is not None else None
@@ -514,8 +577,9 @@ def analyze_combine(
                 dist_net = abs(y_norm - 0.5) / 0.5
                 p_zone = "net" if dist_net < 0.17 else ("service" if dist_net < 0.54 else "baseline")
 
-            # 統計累計
-            player_stats[player]["shots"] += 1
+            # 統計累計（shots 不含發球，發球已在回合開頭單獨計入 serves）
+            if not is_serve:
+                player_stats[player]["shots"] += 1
             player_stats[player]["shot_types"][shot_type] += 1
             depth_counts[p_zone] += 1
             player_depth[player][p_zone] += 1
@@ -523,11 +587,23 @@ def analyze_combine(
                 all_speeds_kmh.append(speed)
                 (serve_speeds_kmh if is_serve else rally_speeds_kmh).append(speed)
 
-            heatmap_contacts.append({"x": x_norm, "y": y_norm, "player": player})
+            _hm_entry: Dict = {"player": player}
+            if ball_world:
+                _hm_entry["x"] = round(ball_world[0], 3)
+                _hm_entry["y"] = round(ball_world[1], 3)
+                _hm_entry["coord"] = "world"
+            else:
+                _hm_entry["x"] = x_norm
+                _hm_entry["y"] = y_norm
+                _hm_entry["coord"] = "pixel"
+            heatmap_contacts.append(_hm_entry)
             if ppos:
                 bucket = heatmap_top if player == "top" else heatmap_bot
-                bucket.append({"x": round(ppos[0] / width, 4),
-                                "y": round(ppos[1] / height, 4)})
+                if player_world:
+                    bucket.append({"x": round(player_world[0], 3),
+                                   "y": round(player_world[1], 3), "coord": "world"})
+                else:
+                    bucket.append({"x": _ppx, "y": _ppy, "coord": "pixel"})
 
             shot: Dict = {
                 "seq": seq + 1,
@@ -555,8 +631,7 @@ def analyze_combine(
             bpos = pos_interp[bf] if bf < len(pos_interp) else None
             if bpos is None:
                 continue
-            x_n = round(bpos[0] / width, 4)
-            y_n = round(bpos[1] / height, 4)
+            x_n, y_n = _pn(bpos)
             b_world = project_to_world(bpos, last_valid_H) if last_valid_H is not None else None
             b_entry: Dict = {
                 "frame": bf,
@@ -567,23 +642,43 @@ def analyze_combine(
                 b_entry["world"] = {"x": round(b_world[0], 2), "y": round(b_world[1], 2)}
                 b_entry["zone"] = bounce_zone(b_world[0], b_world[1])
             bounces_out.append(b_entry)
-            heatmap_bounces.append({"x": x_n, "y": y_n})
+            if b_world:
+                heatmap_bounces.append({"x": round(b_world[0], 3),
+                                        "y": round(b_world[1], 3), "coord": "world"})
+            else:
+                heatmap_bounces.append({"x": x_n, "y": y_n, "coord": "pixel"})
 
-        # ── 回合結果 ──────────────────────────────────────────────────────
-        winner_frame = find_winner_after(bounces_f, rally_contacts[-1], next_start, fps)
-        winner_pos = None
-        winner_player: Optional[str] = None
-        if winner_frame is not None:
-            wb = pos_interp[winner_frame] if winner_frame < len(pos_interp) else None
-            if wb:
-                winner_player = "bottom" if server == "top" else "top"
-                player_stats[winner_player]["winners"] += 1
-                winner_pos = {"x": round(wb[0] / width, 4), "y": round(wb[1] / height, 4)}
+        # ── 回合結果（VLM 判斷得分方）────────────────────────────────────
+        winner_player: Optional[str] = vlm_winner_results.get(rally_idx)
+        if winner_player in ("top", "bottom"):
+            player_stats[winner_player]["winners"] += 1
 
         cut_near = any(rally_contacts[0] <= sc <= rally_contacts[-1] + int(fps * 3)
                        for sc in scene_cut_frames)
-        outcome_type = ("winner" if winner_frame is not None
-                        else "scene_cut" if cut_near else "unknown")
+        outcome_type = ("winner"    if winner_player in ("top", "bottom") else
+                        "scene_cut" if cut_near else "unknown")
+
+        # ── 勝利球落點：最後一拍後，在對方半場的第一個球位置 ─────────────
+        winner_land: Optional[Dict] = None
+        if winner_player in ("top", "bottom") and last_valid_H is not None:
+            last_fi = rally_contacts[-1]
+            end_fi = min(
+                (next_start - 1) if next_start else total_frames_actual,
+                last_fi + int(fps * 3),
+            )
+            for _fi in range(last_fi + 3, end_fi):
+                _bp = pos_interp[_fi] if _fi < len(pos_interp) else None
+                if _bp is None:
+                    continue
+                _bw = project_to_world(_bp, last_valid_H)
+                if _bw is None:
+                    continue
+                # bottom 得分 → 球落在 top 半場（world_y > 網）
+                # top 得分   → 球落在 bottom 半場（world_y < 網）
+                in_opp = (_bw[1] > _NET_Y_M) if winner_player == "bottom" else (_bw[1] < _NET_Y_M)
+                if in_opp:
+                    winner_land = {"x": round(_bw[0], 2), "y": round(_bw[1], 2)}
+                    break
 
         rallies_out.append({
             "id": rally_idx + 1,
@@ -599,7 +694,7 @@ def analyze_combine(
             "outcome": {
                 "type": outcome_type,
                 "winner_player": winner_player,
-                "winner_pos": winner_pos,
+                "winner_land": winner_land,
             },
         })
 
@@ -608,7 +703,7 @@ def analyze_combine(
     avg_rally_length = round(total_shots / total_rallies, 1) if total_rallies > 0 else 0.0
 
     if progress_cb:
-        progress_cb(99, 100)
+        progress_cb(97, 100)
 
     result = {
         "metadata": {
@@ -650,14 +745,14 @@ def analyze_combine(
         },
     }
 
-    _t3_agg = time.perf_counter()
+    _t4_agg = time.perf_counter()
 
     with out_json_path.open("w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    _t3_json = time.perf_counter()
+    _t4_json = time.perf_counter()
 
-    _t3_total = _t3_json - _t3_start
-    _grand_total = total_measured + _t2_total + _t3_total
+    _t4_total = _t4_json - _t4_start
+    _grand_total = total_measured + _t2_total + _t3_total + _t4_total
 
     def _pct(s: float) -> str:
         return f"{s / _grand_total * 100:>4.1f}%"
@@ -672,10 +767,11 @@ def analyze_combine(
         label = "all" if basis == n_all else "proc"
         print(f"  {name:<18}  {sec:>8.3f}  {sec/basis*1000:>8.2f}  {label:>6}  {_pct(sec)}")
     print(f"  {'  detect_events':<18}  {_t2_events - _t2_start:>8.3f}  {'':>9}  {'':>6}  {_pct(_t2_events - _t2_start)}")
-    print(f"  {'  segment_rallies':<18}  {_t2_rallies - _t2_events:>8.3f}  {'':>9}  {'':>6}  {_pct(_t2_rallies - _t2_events)}")
-    print(f"  {'  full_interpolate':<18}  {_t2_interp - _t2_rallies:>8.3f}  {'':>9}  {'':>6}  {_pct(_t2_interp - _t2_rallies)}")
+    print(f"  {'  full_interpolate':<18}  {_t2_interp - _t2_events:>8.3f}  {'':>9}  {'':>6}  {_pct(_t2_interp - _t2_events)}")
     print(f"  {'  speed_compute':<18}  {_t2_speed - _t2_interp:>8.3f}  {'':>9}  {'':>6}  {_pct(_t2_speed - _t2_interp)}")
-    print(f"  {'  aggregation':<18}  {_t3_agg - _t3_start:>8.3f}  {'':>9}  {'':>6}  {_pct(_t3_agg - _t3_start)}")
+    print(f"  {'  vlm_verify':<18}  {_t3_total:>8.3f}  {'':>9}  {'':>6}  {_pct(_t3_total)}")
+    print(f"  {'  aggregation':<18}  {_t4_agg - _t4_start:>8.3f}  {'':>9}  {'':>6}  {_pct(_t4_agg - _t4_start)}")
+    print(f"  {'  json_dump':<18}  {_t4_json - _t4_agg:>8.3f}  {'':>9}  {'':>6}  {_pct(_t4_json - _t4_agg)}")
 
     print(f"  {'-'*18}  {'-'*8}  {'-'*9}  {'-'*6}  {'-'*6}")
     print(f"  {'TOTAL':<18}  {_grand_total:>8.3f}  {_grand_total/n_all*1000:>8.2f}  {'all':>6}  100.0%")

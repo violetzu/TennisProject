@@ -11,15 +11,20 @@ services:
       - .env
     volumes:
       - ./data/huggingface:/root/.cache/huggingface
-      - ./backend/videos:/vllm-workspace/video
     command: >
       ${APP_VLLM_MODEL}
       --tensor-parallel-size 1
       --async-scheduling
-      --max-model-len 24000
+      --max-model-len 32000
       --gpu-memory-utilization 0.85
       --host 0.0.0.0
       --port 8005
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
+      --reasoning-parser qwen3
+      --mm-encoder-tp-mode data
+      --media-io-kwargs '{"video":{"num_frames":12}}'
+      --mm-processor-kwargs '{"fps":2}'
       ${APP_VLLM_API_KEY:+--api-key $APP_VLLM_API_KEY}
     restart: unless-stopped
 
@@ -51,7 +56,7 @@ services:
     volumes:
       - ./backend/:/backend/
     command: >
-      uvicorn app:app --host 0.0.0.0 --port 8000
+      uvicorn app:app --host 0.0.0.0 --port 8000 --no-access-log
       ${BACKEND_DEV_MODE:+--reload --reload-dir /backend}
     tty: true
     stdin_open: true

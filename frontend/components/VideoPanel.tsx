@@ -1,7 +1,7 @@
 // components/VideoPanel.tsx
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { UploadMeta } from "@/hooks/useVideoUpload";
 import { useVideoPanelController } from "@/hooks/useVideoPanelController";
 import type { AnalysisStatusContext } from "@/hooks/useAnalysisStatus";
@@ -25,6 +25,7 @@ export default function VideoPanel({
   loadedRecord,
   onReset,
   onUploaded,
+  seekToRef,
 }: {
   sessionId: string | null;
   analysisRecordId: number | null;
@@ -36,6 +37,7 @@ export default function VideoPanel({
   loadedRecord: LoadedRecord | null;
   onReset?: () => void;
   onUploaded?: () => void;
+  seekToRef?: React.MutableRefObject<((t: number) => void) | null>;
 }) {
   const fileRef    = useRef<HTMLInputElement | null>(null);
   const videoRef   = useRef<HTMLVideoElement | null>(null);
@@ -47,6 +49,19 @@ export default function VideoPanel({
   const [remoteVideoUrl, setRemoteVideoUrl] = useState<string | null>(null);
 
   const lastSrcRef = useRef<string>("");
+
+  // 讓外部可以跳轉影片時間
+  useEffect(() => {
+    if (seekToRef) {
+      seekToRef.current = (t: number) => {
+        const v = videoRef.current;
+        if (!v) return;
+        v.currentTime = t;
+        v.focus();
+      };
+    }
+    return () => { if (seekToRef) seekToRef.current = null; };
+  }, [seekToRef]);
 
   const showVideo = useCallback((src: string) => {
     const v = videoRef.current;

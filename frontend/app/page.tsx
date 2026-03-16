@@ -38,6 +38,10 @@ export default function Page() {
   // ===== 分析結果（analysis JSON）=====
   const [worldData, setWorldData] = useState<any>(null);
 
+  // ===== 影片跳轉（由 VideoPanel 填入，AnalysisPanel 呼叫）=====
+  const seekToRef = useRef<((t: number) => void) | null>(null);
+  const seekVideo = useCallback((t: number) => { seekToRef.current?.(t); }, []);
+
   // ===== 分析完成回調 =====
   const onCompletedRef = useRef<((mode: AnalysisMode) => Promise<void>) | null>(null);
 
@@ -133,7 +137,7 @@ export default function Page() {
               {tabs.map((t) => (
                 <button
                   key={t.key}
-                  className={`llm-tab ${leftTab === t.key ? "active" : ""}`}
+                  className={`pill-tab llm-tab ${leftTab === t.key ? "active" : ""}`}
                   onClick={() => setLeftTab(t.key)}
                   type="button"
                 >
@@ -143,23 +147,26 @@ export default function Page() {
             </div>
 
             <div className="llm-body" style={{ position: "relative" }}>
-              {/* chat */}
-              <div style={{ position: leftTab === "chat" ? "relative" : "absolute", inset: leftTab === "chat" ? undefined : 0, width: "100%", height: "100%", visibility: leftTab === "chat" ? "visible" : "hidden", pointerEvents: leftTab === "chat" ? "auto" : "none" }}>
-                <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} disabled={analysisCtx.transcoding} />
-              </div>
-
-              {/* analysis */}
-              <div style={{ position: leftTab === "analysis" ? "relative" : "absolute", inset: leftTab === "analysis" ? undefined : 0, width: "100%", height: "100%", visibility: leftTab === "analysis" ? "visible" : "hidden", pointerEvents: leftTab === "analysis" ? "auto" : "none" }}>
-                <AnalysisPanel activeTab={analysisTab} onTabChange={setAnalysisTab} worldData={worldData} />
-              </div>
-
-              {/* files */}
-              <div style={{ position: leftTab === "files" ? "relative" : "absolute", inset: leftTab === "files" ? undefined : 0, width: "100%", height: "100%", visibility: leftTab === "files" ? "visible" : "hidden", pointerEvents: leftTab === "files" ? "auto" : "none" }}>
-                {isAuthed
-                  ? <FilePanel onLoadRecord={handleLoadRecord} reloadKey={fileReloadKey} />
-                  : <div style={{ padding: 12, opacity: 0.8 }}>登入後才能查看歷史影片。</div>
-                }
-              </div>
+              {(["chat", "analysis", "files"] as const).map((key) => (
+                <div
+                  key={key}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%", height: "100%",
+                    visibility: leftTab === key ? "visible" : "hidden",
+                    pointerEvents: leftTab === key ? "auto" : "none",
+                    display: "flex", flexDirection: "column",
+                  }}
+                >
+                  {key === "chat"     && <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} disabled={analysisCtx.transcoding} />}
+                  {key === "analysis" && <AnalysisPanel activeTab={analysisTab} onTabChange={setAnalysisTab} worldData={worldData} seekVideo={seekVideo} />}
+                  {key === "files"    && (isAuthed
+                    ? <FilePanel onLoadRecord={handleLoadRecord} reloadKey={fileReloadKey} />
+                    : <div style={{ padding: 12, opacity: 0.8 }}>登入後才能查看歷史影片。</div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -175,6 +182,7 @@ export default function Page() {
               loadedRecord={loadedRecord}
               onReset={handleReset}
               onUploaded={() => setFileReloadKey((k) => k + 1)}
+              seekToRef={seekToRef}
             />
           </div>
         </div>

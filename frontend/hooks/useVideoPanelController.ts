@@ -139,7 +139,7 @@ export function useVideoPanelController({
     if (filename) lines.push(`檔名：${filename}`);
     if (meta) {
       if (meta.width && meta.height) lines.push(`解析度：${meta.width} x ${meta.height}`);
-      if (meta.fps) lines.push(`FPS：${meta.fps}`);
+      if (meta.fps) lines.push(`FPS：${meta.fps.toFixed(2)}`);
       const dt = formatDuration(meta.duration);
       if (dt) lines.push(`時長：${dt}`);
     }

@@ -110,9 +110,7 @@ body.dark .header-chip {
   min-height: 0;
 }
 
-.llm-body {
-  min-height: 0;
-}
+/* llm-body: see canonical definition below */
 
 .chat-shell {
   height: 100%;
@@ -360,72 +358,74 @@ body.dark #uploadIcon {
 }
 
 /* =========================
-   LLM Card Tabs (左側頁籤)
+   Tabs — 共用膠囊頁籤樣式
+   .llm-tabs / .panel-tabs：容器
+   .pill-tab：膠囊本體（llm-tab / panel-tab 各自 override padding/font-size）
    ========================= */
 
-.llm-tabs {
+.llm-tabs,
+.panel-tabs {
   display: flex;
   align-items: center;
   gap: 8px;
-
   padding: 10px 12px 8px;
-
-  /* 跟 composer 一樣的分隔感 */
   border-bottom: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-body.dark .llm-tabs {
+body.dark .llm-tabs,
+body.dark .panel-tabs {
   border-bottom-color: rgba(15, 23, 42, 0.8);
 }
 
-.llm-tab {
-  padding: 7px 12px;
-  font-size: 13px;
+/* 共用膠囊本體 */
+.pill-tab {
   font-weight: 600;
-
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.55);
   background: rgba(255, 255, 255, 0.55);
   color: var(--text-light);
-
   cursor: pointer;
+  user-select: none;
   transition: transform .2s ease, background .2s ease, border-color .2s ease, opacity .2s ease;
 }
 
-.llm-tab:hover {
+.pill-tab:hover {
   transform: translateY(-1px);
   background: rgba(255, 255, 255, 0.7);
   border-color: rgba(148, 163, 184, 0.75);
 }
 
-.llm-tab:active {
+.pill-tab:active {
   transform: translateY(0px);
   opacity: 0.9;
 }
 
-.llm-tab.active {
-  /* 跟你 btn / bubble 的暗色呼應 */
+.pill-tab.active {
   background: #111827;
   border-color: rgba(17, 24, 39, 0.8);
   color: #f9fafb;
 }
 
-body.dark .llm-tab {
+body.dark .pill-tab {
   background: rgba(15, 23, 42, 0.65);
   border-color: rgba(148, 163, 184, 0.35);
   color: var(--text-dark);
 }
 
-body.dark .llm-tab:hover {
+body.dark .pill-tab:hover {
   background: rgba(15, 23, 42, 0.8);
   border-color: rgba(148, 163, 184, 0.55);
 }
 
-body.dark .llm-tab.active {
+body.dark .pill-tab.active {
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.22);
   color: #e5e7eb;
 }
+
+/* Size overrides */
+.llm-tab  { padding: 7px 12px; font-size: 13px; }
+.panel-tab { padding: 6px 10px; font-size: 12px; }
 
 .llm-tabs-right {
   margin-left: auto;
@@ -444,20 +444,18 @@ body.dark .llm-tab.active {
 }
 
 @media (max-width: 960px) {
-  .llm-hint {
-    max-width: 160px;
-  }
+  .llm-hint { max-width: 160px; }
 }
 
 /* 內容區：分析結果 / 對話共用 */
 .llm-body {
   flex: 1;
-  overflow: hidden; /* 避免內容撐爆圓角 */
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-/* 如果你要讓 AnalysisPanel 自己卷軸 */
 .llm-body-scroll {
   flex: 1;
   overflow-y: auto;
@@ -466,78 +464,22 @@ body.dark .llm-tab.active {
 
 
 /* =========================
-   AnalysisPanel (右下/左卡內)
+   AnalysisPanel
    ========================= */
 
 .bottom-panel {
-  /* 跟你 chat 一樣：內容可卷 */
   flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-.panel-tabs {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px 8px;
-
-  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
-}
-
-body.dark .panel-tabs {
-  border-bottom-color: rgba(15, 23, 42, 0.8);
-}
-
-.panel-tab {
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 600;
-
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.55);
-  background: rgba(255, 255, 255, 0.55);
-  color: var(--text-light);
-
-  cursor: pointer;
-  user-select: none;
-
-  transition: transform .2s ease, background .2s ease, border-color .2s ease, opacity .2s ease;
-}
-
-.panel-tab:hover {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(148, 163, 184, 0.75);
-}
-
-.panel-tab.active {
-  background: #111827;
-  border-color: rgba(17, 24, 39, 0.8);
-  color: #f9fafb;
-}
-
-body.dark .panel-tab {
-  background: rgba(15, 23, 42, 0.65);
-  border-color: rgba(148, 163, 184, 0.35);
-  color: var(--text-dark);
-}
-
-body.dark .panel-tab:hover {
-  background: rgba(15, 23, 42, 0.8);
-  border-color: rgba(148, 163, 184, 0.55);
-}
-
-body.dark .panel-tab.active {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #e5e7eb;
-}
-
 .panel-content {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 12px 12px 14px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 空狀態文字（你原本用 file-tree-empty） */

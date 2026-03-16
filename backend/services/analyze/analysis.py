@@ -12,7 +12,6 @@
   - project_to_world()          像素座標 → 世界公尺座標
   - bounce_zone()               落地區域分類（發球區/底線區/網前/出界）
   - player_court_zone()         球員站位區域（net/service/baseline）
-  - classify_shot_type()        擊球類型（serve/overhead/swing/unknown）
 
 所有函式為純函式，不依賴模型或影像處理。
 """
@@ -27,18 +26,28 @@ import numpy as np
 
 from .court import COURT_LENGTH_M, DOUBLES_WIDTH_M
 
+
+def _dist2d(
+    origin: Tuple[float, float],
+    target: Optional[Tuple[float, float]],
+) -> float:
+    """二維歐氏距離；target 為 None 時回傳 inf。"""
+    if target is None:
+        return float("inf")
+    return math.hypot(origin[0] - target[0], origin[1] - target[1])
+
 # ── 球速範圍（ITF：最慢約 20 km/h 吊球；最快發球紀錄 263 km/h，280 留緩衝）──
 MIN_BALL_SPEED_KMH = 20.0
 MAX_BALL_SPEED_KMH = 280.0
 
 # ── 事件偵測參數 ───────────────────────────────────────────────────────────────
-COOLDOWN_FRAMES = 20           # 高fps下給更長冷卻（60fps ≈ 0.33s）
+COOLDOWN_FRAMES = 15           # 一般事件冷卻（60fps ≈ 0.25s）
+COOLDOWN_AFTER_BOUNCE = 6      # bounce 後接 contact 的較短冷卻（底線擊球落地→擊球間隔短）
 MIN_VEL_CHANGE_RATIO = 0.018   # 相對圖高（像素/幀）速度變化閾值，過低會把雜訊誤判
-PROXIMITY_RATIO = 0.18         # 球員接近閾值（相對圖寬）；1920px × 0.18 ≈ 346px
-MIN_CONTACT_VY = 2.0           # 接觸事件 Y 速度下限（近端水平球路 vy 很小，不能設太高）
+MIN_CONTACT_VY = 1.5           # 接觸事件 Y 速度下限（底線水平球路 vy 較小）
 
 # ── 回合切割 ──────────────────────────────────────────────────────────────────
-RALLY_GAP_SEC = 2.5
+RALLY_GAP_SEC = 3.5            # 回合間隔閾值（秒）；2.5 太短，底線長回合中球追蹤中斷可能超過 2s
 
 # ── 世界座標球場幾何常數（ITF 標準，公尺）──────────────────────────────────────
 _NET_Y_M        = COURT_LENGTH_M / 2      # 11.885m，球網 Y
@@ -56,11 +65,14 @@ _COURT_TOL_M    = 0.5                     # 邊界容差（避免邊線稍微出
 def full_interpolate(
     positions: List[Optional[Tuple[float, float]]],
     max_gap: int = 30,
+    scene_cut_frames: Optional[List[int]] = None,
 ) -> List[Optional[Tuple[float, float]]]:
     """
     對全幀球位置做線性插值，填補連續缺失（gap ≤ max_gap）。
     超過 max_gap 的缺失段不插值，保留 None。
+    scene_cut_frames：切鏡幀列表；若缺失段跨越切鏡則不插值，避免產生假軌跡。
     """
+    cut_set: set = set(scene_cut_frames) if scene_cut_frames else set()
     out: List[Optional[Tuple[float, float]]] = list(positions)
     n = len(out)
     i = 0
@@ -79,6 +91,10 @@ def full_interpolate(
             continue
         gap = next_i - prev_i
         if gap > max_gap:
+            i = next_i
+            continue
+        # 若缺失區間內有切鏡幀則不插值
+        if any(prev_i < sc <= next_i for sc in cut_set):
             i = next_i
             continue
         p0 = np.array(out[prev_i], dtype=np.float64)
@@ -162,7 +178,7 @@ def detect_events(
     Returns:
         (contact_frames, bounce_frames)
     """
-    pos = full_interpolate(ball_positions, max_gap=30)
+    pos = full_interpolate(ball_positions, max_gap=30, scene_cut_frames=scene_cut_frames)
 
     vy: List[Optional[float]] = [None] * len(pos)
     for i in range(1, len(pos)):
@@ -172,22 +188,27 @@ def detect_events(
 
     vy_s = smooth(vy, 3)
     vel_threshold = img_h * MIN_VEL_CHANGE_RATIO
-    proximity_px = img_w * PROXIMITY_RATIO
     cut_set = set(scene_cut_frames)
 
     contacts: List[int] = []
     bounces: List[int] = []
     last_event = -100
+    last_event_type: str = ""   # 'contact' or 'bounce'
 
     for i in range(2, len(vy_s) - 1):
         if i in cut_set:
             last_event = -100
+            last_event_type = ""
             continue
         v_prev = vy_s[i - 1]
         v_curr = vy_s[i]
         if v_prev is None or v_curr is None:
             continue
-        if i - last_event < COOLDOWN_FRAMES:
+        # bounce→contact 允許更短冷卻，其餘維持標準冷卻
+        effective_cooldown = (COOLDOWN_AFTER_BOUNCE
+                              if last_event_type == "bounce"
+                              else COOLDOWN_FRAMES)
+        if i - last_event < effective_cooldown:
             continue
 
         reversed_y = (v_prev * v_curr) < 0
@@ -202,20 +223,10 @@ def detect_events(
         if ball_pos is None:
             continue
 
-        bx, by = ball_pos
-
-        def dist_to(p: Optional[Tuple[float, float]]) -> float:
-            return (math.sqrt((bx - p[0]) ** 2 + (by - p[1]) ** 2)
-                    if p is not None else float("inf"))
-
-        tp = player_top[i] if i < len(player_top) else None
-        bp = player_bottom[i] if i < len(player_bottom) else None
-
-        if min(dist_to(tp), dist_to(bp)) < proximity_px:
-            contacts.append(i)
-        else:
-            bounces.append(i)
-
+        # 所有方向反轉皆視為 contact 候選，交由 VLM 驗證是否為揮拍或落地反彈。
+        # 不使用 proximity 判斷，避免遠端球員（pose 偵測不穩定）被誤歸 bounce。
+        contacts.append(i)
+        last_event_type = "contact"
         last_event = i
 
     return contacts, bounces
@@ -282,15 +293,9 @@ def assign_player(
     player_bottom: List[Optional[Tuple[float, float]]],
 ) -> str:
     """依球距上下球員的距離判斷擊球歸屬，回傳 'top' 或 'bottom'。"""
-    bx, by = ball_pos
-
-    def dist_to(p: Optional[Tuple[float, float]]) -> float:
-        return (math.sqrt((bx - p[0]) ** 2 + (by - p[1]) ** 2)
-                if p is not None else float("inf"))
-
     tp = player_top[frame_idx] if frame_idx < len(player_top) else None
     bp = player_bottom[frame_idx] if frame_idx < len(player_bottom) else None
-    return "top" if dist_to(tp) <= dist_to(bp) else "bottom"
+    return "top" if _dist2d(ball_pos, tp) <= _dist2d(ball_pos, bp) else "bottom"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -355,32 +360,3 @@ def player_court_zone(world_y: float) -> str:
     return "baseline"
 
 
-def classify_shot_type(
-    is_serve: bool,
-    action_events: Dict[int, str],
-    frame_idx: int,
-    window: int = 10,
-) -> str:
-    """
-    根據動作辨識結果分類擊球類型。
-
-    is_serve:      該拍是否為回合第一拍（發球）
-    action_events: {幀索引: 動作名稱} 字典（由 ActionRecognizer 產生）
-    frame_idx:     接觸幀索引
-    window:        搜尋窗格（前後各 window 幀）
-
-    Returns:
-        'serve'    發球
-        'overhead' 高壓球
-        'swing'    正常揮拍（正手/反手）
-        'unknown'  無法判斷
-    """
-    if is_serve:
-        return "serve"
-    for f in range(max(0, frame_idx - window), frame_idx + window + 1):
-        act = action_events.get(f)
-        if act == "overhead_hit":
-            return "overhead"
-        if act == "swing":
-            return "swing"
-    return "unknown"

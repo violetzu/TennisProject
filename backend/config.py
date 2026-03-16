@@ -26,10 +26,10 @@ for _d in (VIDEO_DIR, DATA_DIR, CHUNK_DIR, GUEST_VIDEO_DIR):
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 # ── Model paths ───────────────────────────────────────────────────────────────
-BALL_MODEL_PATH  = BASE_DIR / "models" / "ball"   / "best.pt"
-POSE_MODEL_PATH  = BASE_DIR / "models" / "person" / "yolo26n-pose.pt"
-COURT_MODEL_PATH = BASE_DIR / "models" / "court"  / "YOLO26n-pose-court-best.pt"
-
+# BALL_MODEL_PATH  = BASE_DIR / "models" / "ball-yolo26s-imgsz1280-mAP50@0.956-3.8it-best.pt"
+BALL_MODEL_PATH  = BASE_DIR / "models" / "runs/detect/ball/best.pt"
+POSE_MODEL_PATH  = BASE_DIR / "models" / "yolo26n-pose.pt"
+COURT_MODEL_PATH = BASE_DIR / "models" / "court-yolo26n-pose-epochs100-imgsz320-mAP50@0.994-6.5it-best.pt"
 # ── Video serving ─────────────────────────────────────────────────────────────
 VIDEO_URL_DOMAIN = os.getenv("VIDEO_URL_DOMAIN", "http://backend:8000")
 
@@ -67,7 +67,7 @@ class AuthConfig:
 
 VLLM = VLLMConfig(
     url     = os.getenv("APP_VLLM_URL",   "http://vllm:8005"),
-    model   = os.getenv("APP_VLLM_MODEL", "Qwen/Qwen3-VL-8B-Instruct"),
+    model   = os.getenv("APP_VLLM_MODEL", "Qwen/Qwen3.5-27B-FP8"),
     api_key = os.getenv("APP_VLLM_API_KEY"),
 )
 
