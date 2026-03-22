@@ -17,16 +17,11 @@ export default function ChatPanel({
   const isLocked = busy || disabled;
   const [text, setText] = useState("");
 
-  // ✅ 同一個 sessionId 只 hydrate 一次，避免覆蓋使用者剛送出的新訊息
   const hydratedSidRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
-
-    // 同一個 session 不重複 hydrate
     if (hydratedSidRef.current === sessionId) return;
-
-    // initialHistory 有傳就 hydrate（含空陣列也可以清空）
     if (initialHistory) {
       hydrate(initialHistory);
       hydratedSidRef.current = sessionId;
@@ -43,10 +38,7 @@ export default function ChatPanel({
   useEffect(() => {
     const el = chatRef.current;
     if (!el) return;
-
-    const onScroll = () => {
-      autoScrollRef.current = isNearBottom(el);
-    };
+    const onScroll = () => { autoScrollRef.current = isNearBottom(el); };
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
@@ -54,9 +46,7 @@ export default function ChatPanel({
   useEffect(() => {
     const el = chatRef.current;
     if (!el) return;
-    if (autoScrollRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (autoScrollRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   async function onSend() {
@@ -67,18 +57,22 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="chat-shell">
-      <div id="chat" ref={chatRef}>
+    <div className="h-full flex flex-col min-h-0">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5" ref={chatRef}>
         {messages.map((m, idx) => (
-          <div key={idx} className={`msg-row ${m.role}`}>
-            <div className={`bubble ${m.role}`}>{m.text}</div>
+          <div key={idx} className={`flex mb-2.5 ${m.role === "user" ? "justify-end" : ""}`}>
+            <div className={`py-2 px-3.5 rounded-[14px] max-w-[82%] whitespace-pre-wrap break-words text-base ${
+              m.role === "user" ? "bubble-user" : "bubble-assistant"
+            }`}>
+              {m.text}
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="composer">
+      <div className="mt-auto px-3 pt-2.5 pb-3">
         <textarea
-          id="query"
+          className="input min-h-[60px] max-h-[150px] resize-none text-base"
           placeholder="輸入你的問題..."
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -91,8 +85,7 @@ export default function ChatPanel({
           }}
         />
         <button
-          className="send-btn"
-          id="sendBtn"
+          className="btn send-btn-bg mt-2 w-full"
           onClick={() => void onSend()}
           disabled={isLocked || !sessionId || !text.trim()}
           type="button"

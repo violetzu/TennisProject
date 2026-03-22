@@ -83,14 +83,14 @@ export default function FilePanel({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        {err && <div style={{ marginLeft: "auto", color: "salmon", fontSize: 12 }}>{err}</div>}
+    <div className="flex flex-col h-full gap-2.5 px-3 py-2.5">
+      <div className="flex items-center gap-2.5">
+        {err && <div className="ml-auto text-red-400 text-base">{err}</div>}
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", display: "grid", gap: 8, alignContent: "start" }}>
+      <div className="flex-1 overflow-y-auto grid gap-2 content-start">
         {items.length === 0 && (
-          <div style={{ opacity: 0.8, fontSize: 12 }}>
+          <div className="text-base text-gray-500 dark:text-gray-400">
             尚無歷史影片。登入後上傳影片才會出現在這裡。
           </div>
         )}
@@ -98,22 +98,21 @@ export default function FilePanel({
         {items.map((v) => (
           <div
             key={v.id}
-            className="glass-base"
-            style={{ padding: 10, display: "grid", gap: 6 }}
+            className="glass p-2.5 grid gap-1.5"
           >
-            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-              <div style={{ fontWeight: 700 }}>{v.video_name}</div>
-              <div style={{ marginLeft: "auto", fontSize: 12, opacity: 0.8 }}>
+            <div className="flex gap-2.5 items-baseline">
+              <div className="font-bold">{v.video_name}</div>
+              <div className="ml-auto text-base text-gray-500 dark:text-gray-400">
                 {fmtBytes(v.size_bytes)}{" "}
                 {v.created_at ? `· ${new Date(v.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}` : ""}
               </div>
             </div>
 
-            <div style={{ fontSize: 12, opacity: 0.85 }}>
+            <div className="text-base text-gray-500 dark:text-gray-400">
               {statusLabel(v)}
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="flex gap-2 flex-wrap">
               <button
                 className="btn btn-green"
                 type="button"

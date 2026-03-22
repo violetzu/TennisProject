@@ -2,7 +2,7 @@
 
 import { EmptyState } from "./types";
 
-function ZoneBar({ label, color, zones }: { label: string; color: string; zones: { net: number; service: number; baseline: number } }) {
+function ZoneBar({ label, colorClass, colorVar, zones }: { label: string; colorClass: string; colorVar: string; zones: { net: number; service: number; baseline: number } }) {
   const total = (zones.net ?? 0) + (zones.service ?? 0) + (zones.baseline ?? 0);
   if (total === 0) return null;
   const pct = (v: number) => Math.round((v / total) * 100);
@@ -15,24 +15,24 @@ function ZoneBar({ label, color, zones }: { label: string; color: string; zones:
   const isTop = label.includes("▲");
 
   return (
-    <div style={{ flex: 1 }}>
-      <div style={{ fontSize: "13px", fontWeight: "bold", color, marginBottom: "8px" }}>{label}</div>
+    <div className="flex-1">
+      <div className={`text-base font-bold mb-2 ${colorClass}`}>{label}</div>
       {rows.map(({ key, label: rl, fill, value }) => {
         const p = pct(value);
         return (
-          <div key={key} style={{ marginBottom: "6px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#aaa", marginBottom: "2px" }}>
+          <div key={key} className="mb-1.5">
+            <div className="flex justify-between text-base text-gray-500 dark:text-gray-400 mb-0.5">
               <span>{rl}</span>
-              <span>{p}% <span style={{ color: "#666" }}>({value})</span></span>
+              <span>{p}% <span className="text-gray-400 dark:text-gray-500">({value})</span></span>
             </div>
-            <div style={{ height: "6px", background: "rgba(255,255,255,0.08)", borderRadius: "3px", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${p}%`, background: fill, borderRadius: "3px", transition: "width 0.3s" }} />
+            <div className="h-1.5 bg-white/[0.08] rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${p}%`, background: fill }} />
             </div>
           </div>
         );
       })}
 
-      <svg width="100%" viewBox="0 0 100 54" style={{ marginTop: "8px", display: "block" }}>
+      <svg width="100%" viewBox="0 0 100 54" className="mt-2 block">
         <rect x="0" y="0" width="100" height="54" fill="#1a472a" rx="2" />
         {isTop ? (
           <>
@@ -68,15 +68,15 @@ export default function DepthTab({ data }: { data: any }) {
   if (!hasData) return <EmptyState message="未偵測到站位數據" />;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      <div style={{ display: "flex", gap: "20px" }}>
-        <ZoneBar label="▲ 上方球員" color="#4FC3F7" zones={topZones} />
-        <ZoneBar label="▼ 下方球員" color="#FFB74D" zones={botZones} />
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-5">
+        <ZoneBar label="▲ 上方球員" colorClass="text-player-top" colorVar="var(--color-player-top)" zones={topZones} />
+        <ZoneBar label="▼ 下方球員" colorClass="text-player-bottom" colorVar="var(--color-player-bottom)" zones={botZones} />
       </div>
-      <div style={{ fontSize: "11px", color: "#555", display: "flex", gap: "12px" }}>
-        <span style={{ color: "#4CAF50" }}>■ 網前</span>
-        <span style={{ color: "#FFC107" }}>■ 發球區</span>
-        <span style={{ color: "#f44336" }}>■ 底線</span>
+      <div className="text-base text-gray-500 dark:text-gray-400 flex gap-3">
+        <span className="text-green-500">■ 網前</span>
+        <span className="text-yellow-500">■ 發球區</span>
+        <span className="text-red-500">■ 底線</span>
       </div>
     </div>
   );

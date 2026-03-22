@@ -13,5 +13,5 @@ export const SHOT_TYPE_LABEL: Record<string, string> = {
 };
 
 export function EmptyState({ message }: { message: string }) {
-  return <div className="file-tree-empty">{message}</div>;
+  return <div className="px-3 py-3.5 text-base text-gray-500 dark:text-gray-400">{message}</div>;
 }

@@ -38,7 +38,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = (await res.json()) as User;
       setUser(data);
     } catch {
-      // token 失效就當成登出狀態（也可選擇順便 clearToken）
+      // token 失效 → 清除，回到登出狀態
+      clearToken();
+      setTokenState(null);
       setUser(null);
     }
   }, []);
@@ -57,8 +59,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(
     async (newToken: string) => {
       persistToken(newToken);
-      setTokenState(newToken); // 讓 Page 立刻變 isAuthed
-      await refresh();         // 再把 user 抓回來（username 立刻顯示）
+      setTokenState(newToken);
+      await refresh(); // 驗證 token 並取得 user → isAuthed 才會變 true
     },
     [refresh]
   );
@@ -73,7 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       token,
       user,
-      isAuthed: !!token,
+      isAuthed: !!token && !!user,
       login,
       logout,
       refresh,

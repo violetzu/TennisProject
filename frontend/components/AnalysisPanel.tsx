@@ -20,12 +20,12 @@ export default function AnalysisPanel({
   seekVideo?: (t: number) => void;
 }) {
   return (
-    <div className="bottom-panel">
-      <div className="panel-tabs">
+    <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
         {TABS.map((tab) => (
           <div
             key={tab.id}
-            className={`pill-tab panel-tab ${activeTab === tab.id ? "active" : ""}`}
+            className={`pill-tab py-[7px] px-3 text-base cursor-pointer ${activeTab === tab.id ? "active" : ""}`}
             onClick={() => onTabChange(tab.id)}
           >
             {tab.label}
@@ -33,7 +33,7 @@ export default function AnalysisPanel({
         ))}
       </div>
 
-      <div className="panel-content">
+      <div className="flex-1 overflow-hidden p-3 flex flex-col">
         {activeTab === "rally"  && <RallyTab  data={worldData} onShotClick={seekVideo ? (s) => seekVideo(s.time_sec ?? 0) : undefined} />}
         {activeTab === "player" && <PlayerTab data={worldData} />}
         {activeTab === "depth"  && <DepthTab  data={worldData} />}

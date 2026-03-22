@@ -79,11 +79,11 @@ export default function AuthModal({
   const title = mode === "login" ? "登入" : "註冊";
 
   return (
-    <div className="auth-backdrop" role="dialog" aria-modal="true">
-      <div className="glass-base auth-card">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 18, fontWeight: 800 }}>{title}</div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+    <div className="fixed inset-0 z-[9999] grid place-items-center bg-black/35 backdrop-blur-[10px]" role="dialog" aria-modal="true">
+      <div className="glass w-[360px] px-[22px] py-6">
+        <div className="flex items-center gap-2.5">
+          <div className="text-lg font-extrabold">{title}</div>
+          <div className="ml-auto flex gap-2">
             <button className="btn" type="button" onClick={() => { setMode("login"); setMsg(null); }} disabled={busy}>
               登入
             </button>
@@ -96,11 +96,11 @@ export default function AuthModal({
           </div>
         </div>
 
-        <div style={{ height: 12 }} />
+        <div className="h-3" />
 
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "grid", gap: 4 }}>
-            <label style={{ fontSize: 12, opacity: 0.65 }}>帳號</label>
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <label className="text-base text-gray-500 dark:text-gray-400">帳號</label>
             <input
               value={username} onChange={(e) => setUsername(e.target.value)}
               placeholder="請輸入帳號" className="input"
@@ -109,8 +109,8 @@ export default function AuthModal({
             />
           </div>
 
-          <div style={{ display: "grid", gap: 4 }}>
-            <label style={{ fontSize: 12, opacity: 0.65 }}>密碼</label>
+          <div className="grid gap-1">
+            <label className="text-base text-gray-500 dark:text-gray-400">密碼</label>
             <div className="input-wrap">
               <input
                 value={password} onChange={(e) => setPassword(e.target.value)}
@@ -127,8 +127,8 @@ export default function AuthModal({
           </div>
 
           {mode === "register" && (
-            <div style={{ display: "grid", gap: 4 }}>
-              <label style={{ fontSize: 12, opacity: 0.65 }}>確認密碼</label>
+            <div className="grid gap-1">
+              <label className="text-base text-gray-500 dark:text-gray-400">確認密碼</label>
               <div className="input-wrap">
                 <input
                   value={password2} onChange={(e) => setPassword2(e.target.value)}
@@ -145,7 +145,7 @@ export default function AuthModal({
           )}
 
           {msg && (
-            <div style={{ color: msg.ok ? "#4ade80" : "salmon", fontSize: 12 }}>
+            <div className={`text-base ${msg.ok ? "text-green-400" : "text-red-400"}`}>
               {msg.text}
             </div>
           )}

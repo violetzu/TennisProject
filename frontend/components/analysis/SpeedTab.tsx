@@ -13,9 +13,9 @@ export default function SpeedTab({ data }: { data: any }) {
   if (!all.count) return <EmptyState message="未偵測到擊球速度數據" />;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-      <div style={{ fontSize: "13px", color: "#888" }}>整體</div>
-      <div className="stats-grid">
+    <div className="flex flex-col gap-3">
+      <div className="text-base text-gray-500 dark:text-gray-400">整體</div>
+      <div className="grid grid-cols-2 gap-2.5 max-tablet:grid-cols-1">
         <StatCard label="平均球速" value={`${all.avg_kmh ?? "—"} km/h`} />
         <StatCard label="最高球速" value={`${all.max_kmh ?? "—"} km/h`} color="#f44336" />
         <StatCard label="最低球速" value={`${all.min_kmh ?? "—"} km/h`} />
@@ -24,9 +24,9 @@ export default function SpeedTab({ data }: { data: any }) {
 
       {serves.count > 0 && (
         <>
-          <div style={{ fontSize: "13px", color: "#888" }}>發球</div>
-          <div className="stats-grid">
-            <StatCard label="平均" value={`${serves.avg_kmh ?? "—"} km/h`} color="#4FC3F7" />
+          <div className="text-base text-gray-500 dark:text-gray-400">發球</div>
+          <div className="grid grid-cols-2 gap-2.5 max-tablet:grid-cols-1">
+            <StatCard label="平均" value={`${serves.avg_kmh ?? "—"} km/h`} color="var(--color-player-top)" />
             <StatCard label="最高" value={`${serves.max_kmh ?? "—"} km/h`} color="#f44336" />
           </div>
         </>
@@ -34,9 +34,9 @@ export default function SpeedTab({ data }: { data: any }) {
 
       {rally.count > 0 && (
         <>
-          <div style={{ fontSize: "13px", color: "#888" }}>回合球</div>
-          <div className="stats-grid">
-            <StatCard label="平均" value={`${rally.avg_kmh ?? "—"} km/h`} color="#FFB74D" />
+          <div className="text-base text-gray-500 dark:text-gray-400">回合球</div>
+          <div className="grid grid-cols-2 gap-2.5 max-tablet:grid-cols-1">
+            <StatCard label="平均" value={`${rally.avg_kmh ?? "—"} km/h`} color="var(--color-player-bottom)" />
             <StatCard label="最高" value={`${rally.max_kmh ?? "—"} km/h`} color="#f44336" />
           </div>
         </>

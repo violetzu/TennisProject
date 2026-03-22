@@ -57,8 +57,8 @@ export default function CourtTab({ data }: { data: any }) {
   const maxHeat = Math.max(1, ...heat.flat());
 
   return (
-    <div style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}>
-      <svg width={SVG_W} height={SVG_H} style={{ background: "#1a472a", borderRadius: "8px", flexShrink: 0 }}>
+    <div className="flex gap-5 items-start">
+      <svg width={SVG_W} height={SVG_H} className="bg-[#1a472a] rounded-lg shrink-0">
         {/* 熱力圖 */}
         {heat.map((row, ri) =>
           row.map((v, ci) => (
@@ -96,23 +96,23 @@ export default function CourtTab({ data }: { data: any }) {
         }
       </svg>
 
-      <div style={{ fontSize: "12px", color: "#aaa" }}>
-        <div style={{ marginBottom: "12px", fontWeight: "bold" }}>圖例</div>
-        <div style={{ marginBottom: "8px" }}>
-          <span style={{ display: "inline-block", width: "12px", height: "12px", background: "rgba(79,195,247,0.75)", borderRadius: "50%", marginRight: "6px" }} />
+      <div className="text-base text-gray-500 dark:text-gray-400">
+        <div className="mb-3 font-bold">圖例</div>
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-full bg-player-top/75" />
           ▲ 上方球員落點
         </div>
-        <div style={{ marginBottom: "8px" }}>
-          <span style={{ display: "inline-block", width: "12px", height: "12px", background: "rgba(255,183,77,0.75)", borderRadius: "50%", marginRight: "6px" }} />
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-full bg-player-bottom/75" />
           ▼ 下方球員落點
         </div>
-        <div style={{ marginBottom: "16px" }}>
-          <span style={{ display: "inline-block", width: "12px", height: "12px", background: "#f44336", borderRadius: "50%", marginRight: "6px" }} />
+        <div className="mb-3 flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-full bg-red-500" />
           ★ 勝利球落點
         </div>
-        <div style={{ marginBottom: "8px", fontWeight: "bold" }}>熱力圖 (擊球分布)</div>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <span style={{ width: "20px", height: "12px", background: "linear-gradient(to right,rgba(76,200,80,0.3),rgba(200,200,50,0.5),rgba(244,67,54,0.7))", borderRadius: "2px", display: "inline-block" }} />
+        <div className="mb-2 font-bold">熱力圖 (擊球分布)</div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-5 h-3 rounded-sm inline-block" style={{ background: "linear-gradient(to right,rgba(76,200,80,0.3),rgba(200,200,50,0.5),rgba(244,67,54,0.7))" }} />
           <span>低 → 高</span>
         </div>
       </div>

@@ -21,8 +21,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 ? "dark"
                 : "light";
             }
+            document.documentElement.classList.add(t);
             document.body.classList.add(t);
           } catch (e) {
+            document.documentElement.classList.add("light");
             document.body.classList.add("light");
           }
         })();

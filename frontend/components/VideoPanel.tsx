@@ -70,7 +70,6 @@ export default function VideoPanel({
     if (lastSrcRef.current === normalized && v.src) return;
     lastSrcRef.current = normalized;
     v.src = normalized;
-    v.style.display = "block";
   }, []);
 
   const {
@@ -175,7 +174,7 @@ export default function VideoPanel({
     lastSrcRef.current = "";
     lastHydratedRecordRef.current = null;
     const v = videoRef.current;
-    if (v) { v.removeAttribute("src"); v.load(); }
+    if (v) { v.removeAttribute("src"); v.load(); v.style.display = ""; }
     // 清空 file input value，確保下次選同一檔案時 onChange 仍會觸發
     if (fileRef.current) fileRef.current.value = "";
     onReset?.();
@@ -190,11 +189,11 @@ export default function VideoPanel({
 
   return (
     <>
-      <div className="glass-base control-card">
-        <div className="control-row">
+      <div className="glass px-4 pt-3.5 pb-2.5 flex flex-col gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <input
-            id="file" ref={fileRef} type="file" accept="video/*"
-            style={{ display: "none" }}
+            ref={fileRef} type="file" accept="video/*"
+            className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }}
           />
 
@@ -225,59 +224,53 @@ export default function VideoPanel({
             重置分析
           </button>
 
-          <button className="btn" id="resetBtn" type="button" disabled={lockAll} onClick={resetAll}>
+          <button className="btn" type="button" disabled={lockAll} onClick={resetAll}>
             重置影片
           </button>
 
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              className="progress-bar-wrap"
-              style={{ display: progressBar.show ? "block" : "none" }}
-            >
-              <div className="progress-bar" style={{ width: `${progressBar.pct}%` }} />
-            </div>
+          <div className="ml-auto flex items-center gap-2.5">
+            {progressBar.show && (
+              <div className="w-[140px] h-[6px] rounded-full bg-slate-200/60 dark:bg-slate-700/60 overflow-hidden">
+                <div className="h-full rounded-full bg-green-500 transition-[width] duration-300" style={{ width: `${progressBar.pct}%` }} />
+              </div>
+            )}
           </div>
         </div>
 
-        <div id="status" style={{ display: "flex", alignItems: "center" }}>
+        <div className="flex items-center text-base">
           <span>{statusText}</span>
           {progressBar.show && (
-            <span style={{ marginLeft: "auto", minWidth: 220, textAlign: "right", fontSize: 12, opacity: 0.8, whiteSpace: "nowrap" }}>
+            <span className="ml-auto min-w-[220px] text-right text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
               {progressBar.text}
             </span>
           )}
         </div>
 
-        <div id="videoInfo">{videoInfoText}</div>
+        <div className="text-sm text-gray-500 dark:text-gray-400">{videoInfoText}</div>
       </div>
 
-      <div className="glass-base video-card">
+      <div className="glass flex-1 p-0 overflow-hidden relative">
         <div
-          className="video-wrapper" id="dropZone" ref={wrapperRef}
+          className="w-full h-full relative rounded-[18px] overflow-hidden"
+          ref={wrapperRef}
           onClick={!hasAnyVideo ? () => { if (!lockAll) fileRef.current?.click(); } : undefined}
         >
-          <div id="videoPlaceholder" style={{ display: hasAnyVideo ? "none" : "flex" }}>
-            <img src="/update.svg" id="uploadIcon" alt="上傳圖示" />
-            <div>點擊新增或拖曳影片檔案到此區塊</div>
-            <button
-              className="vp-upload-btn" type="button"
-              onClick={(e) => { e.stopPropagation(); if (!lockAll) fileRef.current?.click(); }}
-            >
-              選擇影片
-            </button>
+          <div className={`absolute inset-0 flex-col items-center justify-center gap-2.5 text-center cursor-pointer text-gray-500 dark:text-gray-400 ${hasAnyVideo ? "hidden" : "flex"}`}>
+            <img src="/update.svg" className="w-12 h-12 upload-icon-invert" alt="上傳圖示" />
+            <div className="text-base">點擊新增或拖曳影片檔案到此區塊</div>
           </div>
 
           <video
-            id="videoPlayer" ref={videoRef} controls
+            ref={videoRef} controls
+            className={`w-full h-full object-contain cursor-pointer ${hasAnyVideo ? "block" : "hidden"}`}
             onClick={(e) => {
               e.stopPropagation();
               const v = e.currentTarget;
               v.paused ? void v.play() : v.pause();
             }}
-            style={{ display: hasAnyVideo ? "block" : "none", cursor: "pointer" }}
           />
 
-          <canvas id="overlay" />
+          <canvas className="hidden" />
         </div>
       </div>
     </>

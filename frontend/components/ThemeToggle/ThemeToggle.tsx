@@ -6,9 +6,10 @@ import "./ThemeToggle.css";
 type Theme = "light" | "dark";
 
 function applyTheme(theme: Theme) {
-  const body = document.body;
-  body.classList.remove("light", "dark");
-  body.classList.add(theme);
+  document.documentElement.classList.remove("light", "dark");
+  document.documentElement.classList.add(theme);
+  document.body.classList.remove("light", "dark");
+  document.body.classList.add(theme);
 
   try {
     localStorage.setItem("theme", theme);
@@ -30,7 +31,7 @@ export default function ThemeToggle() {
   return (
     <button
       id="themeToggle"
-      className="glass-base theme-toggle"
+      className="glass theme-toggle"
       type="button"
       aria-label="Toggle theme"
       onClick={mounted ? onToggle : undefined}

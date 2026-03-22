@@ -67,7 +67,6 @@ export default function Page() {
   // ===== 載入歷史後 seed 分析狀態 =====
   useEffect(() => {
     if (!loadedRecord) return;
-    // 無論如何都同步 worldData（重置後 world_data 為 null，確保清空）
     setWorldData(loadedRecord.world_data ?? null);
     if (loadedRecord.has_analysis || loadedRecord.has_yolo) {
       analysisCtx.seedStatus("combine", "completed", 100, null, loadedRecord.yolo_video_url);
@@ -107,10 +106,10 @@ export default function Page() {
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
 
       <div className={authOpen ? "page-blurred" : ""}>
-        <header className="header">
-          <div className="glass-base header-chip">網球比賽分析助手</div>
+        <header className="h-16 px-5 py-3 flex justify-between items-center gap-3">
+          <div className="glass header-chip">網球比賽分析助手</div>
 
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="ml-auto flex items-center gap-2.5">
             {!isAuthed ? (
               <button className="btn btn-green" type="button" onClick={() => setAuthOpen(true)}>
                 登入 / 註冊
@@ -131,13 +130,13 @@ export default function Page() {
           </div>
         </header>
 
-        <div className="main">
-          <div className="glass-base llm-card">
-            <div className="llm-tabs">
+        <div className="px-5 pb-5 pt-3 flex gap-5 h-[calc(100vh-64px)] max-tablet:flex-col max-tablet:h-auto">
+          <div className="glass w-[32%] max-tablet:w-full flex flex-col overflow-hidden p-0 min-h-0">
+            <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
               {tabs.map((t) => (
                 <button
                   key={t.key}
-                  className={`pill-tab llm-tab ${leftTab === t.key ? "active" : ""}`}
+                  className={`pill-tab py-[7px] px-3 text-base ${leftTab === t.key ? "active" : ""}`}
                   onClick={() => setLeftTab(t.key)}
                   type="button"
                 >
@@ -146,31 +145,26 @@ export default function Page() {
               ))}
             </div>
 
-            <div className="llm-body" style={{ position: "relative" }}>
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col relative">
               {(["chat", "analysis", "files"] as const).map((key) => (
                 <div
                   key={key}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: "100%", height: "100%",
-                    visibility: leftTab === key ? "visible" : "hidden",
-                    pointerEvents: leftTab === key ? "auto" : "none",
-                    display: "flex", flexDirection: "column",
-                  }}
+                  className={`absolute inset-0 w-full h-full flex flex-col ${
+                    leftTab === key ? "visible pointer-events-auto" : "invisible pointer-events-none"
+                  }`}
                 >
                   {key === "chat"     && <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} disabled={analysisCtx.transcoding} />}
                   {key === "analysis" && <AnalysisPanel activeTab={analysisTab} onTabChange={setAnalysisTab} worldData={worldData} seekVideo={seekVideo} />}
                   {key === "files"    && (isAuthed
                     ? <FilePanel onLoadRecord={handleLoadRecord} reloadKey={fileReloadKey} />
-                    : <div style={{ padding: 12, opacity: 0.8 }}>登入後才能查看歷史影片。</div>
+                    : <div className="p-3 text-sm text-gray-500 dark:text-gray-400">登入後才能查看歷史影片。</div>
                   )}
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="right-col">
+          <div className="w-[68%] max-tablet:w-full flex flex-col gap-5">
             <VideoPanel
               sessionId={sessionId}
               analysisRecordId={analysisRecordId}
