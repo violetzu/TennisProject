@@ -28,7 +28,7 @@ ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 # ── Model paths ───────────────────────────────────────────────────────────────
 # BALL_MODEL_PATH  = BASE_DIR / "models" / "ball-yolo26s-imgsz1280-mAP50@0.956-3.8it-best.pt"
 BALL_MODEL_PATH  = BASE_DIR / "models" / "runs/detect/ball/best.pt"
-POSE_MODEL_PATH  = BASE_DIR / "models" / "yolo26n-pose.pt"
+POSE_MODEL_PATH  = BASE_DIR / "models" / "yolo26s-pose.pt"
 COURT_MODEL_PATH = BASE_DIR / "models" / "court-yolo26n-pose-epochs100-imgsz320-mAP50@0.994-6.5it-best.pt"
 # ── Video serving ─────────────────────────────────────────────────────────────
 VIDEO_URL_DOMAIN = os.getenv("VIDEO_URL_DOMAIN", "http://backend:8000")

@@ -1,90 +1,156 @@
 """
-球偵測輔助 (Ball Detection Helpers)
+球偵測模組 (Ball Detection)
 
 包含：
-  - is_valid_ball()     幾何 + 位置 + 顏色篩選
-  - extract_xyxy_conf() 從 Ultralytics result 取出 boxes
-  - interpolate_window() 滑動窗口線性插值
-  - new_kalman()        建立標準 Kalman 濾波器
+  - BallTracker           跨幀狀態管理（黑名單 + stuck + 跳躍距離過濾）
+  - is_valid_ball()       幾何 + 位置 + 顏色篩選
+  - extract_xyxy_conf()   從 Ultralytics result 取出 boxes
 """
 
 from __future__ import annotations
 
-from typing import Deque, List, Optional, Tuple
+import math
+from typing import List, Optional, Tuple
 
-import cv2
 import numpy as np
 
-# ── 球篩選閾值 ─────────────────────────────────────────────────────────────────
-BALL_AREA_MIN = 10
-BALL_AREA_MAX = 3000
-BALL_RATIO_MIN = 0.15
-BALL_RATIO_MAX = 6.0
-BALL_SAT_MIN = 15      # HSV 飽和度下限（排除純白線）
 
-# ── Kalman 追蹤參數 ────────────────────────────────────────────────────────────
-ROI_SIZE = 256
-STUCK_FRAMES_LIMIT = 6
-STUCK_DIST_THRESHOLD = 3.0
-RESET_AFTER_MISS = 15
+# ── 跳躍距離限制 ─────────────────────────────────────────────────────────────────
+MAX_JUMP_RATIO = 0.12           # 單幀最大跳躍距離占畫面對角線比例（超過直接丟棄）
+MISS_RESET_FRAMES = 5           # 連續 N 幀未偵測到球 → 重置 last_center 允許重新捕獲
 
-# ── 靜止位置黑名單（防止假陽性反覆被接受）────────────────────────────────────
-# stuck 觸發後將該位置加入黑名單，BLACKLIST_TTL 幀內的相鄰偵測會被丟棄
-STATIC_BLACKLIST_RADIUS = 25.0   # 黑名單影響半徑（像素）
-STATIC_BLACKLIST_TTL    = 90     # 黑名單存活幀數（約 3 秒 @ 30fps）
+# ── 靜止假陽性偵測 ─────────────────────────────────────────────────────────────
+STUCK_FRAMES_LIMIT   = 6        # 連續 N 幀位移極小 → 視為靜止假陽性
+STUCK_DIST_THRESHOLD = 3.0      # 靜止判定閾值（像素）
 
-# ── 滑動窗口 ──────────────────────────────────────────────────────────────────
-WINDOW = 12
-MAX_GAP = 10
+# ── 靜止位置黑名單 ─────────────────────────────────────────────────────────────
+STATIC_BLACKLIST_RADIUS = 25.0  # 黑名單影響半徑（像素）
+STATIC_BLACKLIST_TTL    = 90    # 黑名單存活幀數（≈3s @30fps）
+
+# ── 滑動窗口（輸出延遲用，供 main.py 軌跡繪製的前後文判斷）──────────────────
+WINDOW  = 12
 
 
-def is_valid_ball(box: list, img_w: int, img_h: int, frame: np.ndarray) -> bool:
-    """
-    幾何 + 位置 + 顏色三層篩選，過濾非球偵測結果。
+class BallTracker:
+    """跨幀球追蹤狀態（黑名單 + stuck 偵測）"""
 
-    Args:
-        box:   [x1, y1, x2, y2]
-        img_w: 圖寬（像素）
-        img_h: 圖高（像素）
-        frame: 原始 BGR 幀（用於顏色篩選）
+    def __init__(self) -> None:
+        self.last_center: Optional[Tuple[float, float]] = None
+        self.stuck_count: int = 0
+        self.miss_count: int = 0
+        self._blacklist: List[Tuple[float, float, int]] = []  # (cx, cy, expire_frame)
 
-    Returns:
-        True 若通過所有篩選。
-    """
-    x1, y1, x2, y2 = map(int, box[:4])
-    w, h = x2 - x1, y2 - y1
-    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-    area = w * h
+    def reset(self) -> None:
+        self.last_center = None
+        self.stuck_count = 0
+        self.miss_count = 0
 
-    # 面積與長寬比
-    if area < BALL_AREA_MIN or area > BALL_AREA_MAX:
-        return False
-    ratio = w / (h + 1e-6)
-    if ratio < BALL_RATIO_MIN or ratio > BALL_RATIO_MAX:
-        return False
+    def detect(
+        self,
+        model,
+        frame: np.ndarray,
+        img_w: int,
+        img_h: int,
+        frame_idx: int,
+    ) -> Optional[list]:
+        """
+        單幀全圖偵測，回傳 [x1,y1,x2,y2] 或 None。
+        內部管理黑名單與 stuck 過濾。
+        """
+        # 清除過期黑名單
+        self._blacklist[:] = [
+            (x, y, e) for x, y, e in self._blacklist if e > frame_idx
+        ]
 
-    # 位置：排除網柱邊緣 & 畫面極端邊緣
-    if img_h * 0.44 < cy < img_h * 0.56:
-        if cx < img_w * 0.30 or cx > img_w * 0.70:
-            return False
+        preds = model.predict(source=frame, imgsz=1280, conf=0.1, verbose=False)
+        if not preds:
+            return None
+
+        xyxy_list, confs = extract_xyxy_conf(preds[0])
+        cands: List[Tuple[list, float, Tuple[float, float]]] = []
+
+        for box, conf in zip(xyxy_list, confs):
+            if not is_valid_ball(box, img_w, img_h):
+                continue
+            gc = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+            if any(
+                math.hypot(gc[0] - bx, gc[1] - by) < STATIC_BLACKLIST_RADIUS
+                for bx, by, _ in self._blacklist
+            ):
+                continue
+            cands.append((box, conf, gc))
+
+        if not cands:
+            self.miss_count += 1
+            if self.miss_count >= MISS_RESET_FRAMES:
+                self.last_center = None
+                self.miss_count = 0
+            return None
+
+        # 有上一幀位置時，只選跳躍距離合理的候選
+        max_jump = math.hypot(img_w, img_h) * MAX_JUMP_RATIO
+        if self.last_center:
+            lx, ly = self.last_center
+            near = [(b, c, g) for b, c, g in cands
+                    if math.hypot(g[0] - lx, g[1] - ly) < max_jump]
+            if near:
+                cands = near
+            else:
+                # 全部超距 → 視為未偵測到，等插值填補
+                self.miss_count += 1
+                if self.miss_count >= MISS_RESET_FRAMES:
+                    self.last_center = None
+                    self.miss_count = 0
+                return None
+
+        self.miss_count = 0
+        chosen_box, _, (cbx, cby) = max(cands, key=lambda c: c[1])
+
+        # stuck 偵測
+        if (
+            self.last_center
+            and math.hypot(cbx - self.last_center[0], cby - self.last_center[1])
+            < STUCK_DIST_THRESHOLD
+        ):
+            self.stuck_count += 1
+        else:
+            self.stuck_count = max(0, self.stuck_count - 1)
+            self.last_center = (cbx, cby)
+
+        if self.stuck_count >= STUCK_FRAMES_LIMIT:
+            if self.last_center is not None:
+                self._blacklist.append(
+                    (self.last_center[0], self.last_center[1],
+                     frame_idx + STATIC_BLACKLIST_TTL)
+                )
+            self.last_center = None
+            self.stuck_count = 0
+            return None
+
+        if self.stuck_count > 0:
+            return None
+
+        return chosen_box
+
+
+# ── 低階輔助 ──────────────────────────────────────────────────────────────────
+
+def is_valid_ball(box: list, img_w: int, img_h: int) -> bool:
+    """排除畫面極端邊緣的誤偵測。"""
+    _, y1, _, y2 = box[:4]
+    cy = (y1 + y2) / 2
     if cy < img_h * 0.05 or cy > img_h * 0.98:
         return False
-
-    # 顏色：網球為黃綠色，飽和度不低
-    roi = frame[max(0, y1):min(img_h, y2), max(0, x1):min(img_w, x2)]
-    if roi.size > 0:
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        if float(np.mean(hsv[:, :, 1])) < BALL_SAT_MIN:
-            return False
-
     return True
 
 
 def extract_xyxy_conf(result) -> Tuple[list, list]:
     """從 Ultralytics result 取出 xyxy box list 和 conf list。"""
-    if (result is None
-            or getattr(result, "boxes", None) is None
-            or len(result.boxes) == 0):
+    if (
+        result is None
+        or getattr(result, "boxes", None) is None
+        or len(result.boxes) == 0
+    ):
         return [], []
     xyxy = result.boxes.xyxy
     conf = result.boxes.conf
@@ -93,51 +159,3 @@ def extract_xyxy_conf(result) -> Tuple[list, list]:
     return xyxy.cpu().tolist(), conf.cpu().tolist()
 
 
-def interpolate_window(boxes: list, max_gap: int = MAX_GAP) -> list:
-    """
-    在長度為 WINDOW 的 box 列表中做線性插值，填補 None。
-
-    Args:
-        boxes:   Optional[list] 的列表，None 表示該幀未偵測到球
-        max_gap: 最大允許填補的連續缺失幀數
-
-    Returns:
-        插值後的列表（同長度）。
-    """
-    out = list(boxes)
-    valid = [i for i, b in enumerate(out) if b is not None]
-    if len(valid) < 2:
-        return out
-    for i in range(len(out)):
-        if out[i] is not None:
-            continue
-        prev_i = next((j for j in range(i - 1, -1, -1) if out[j] is not None), None)
-        next_i = next((j for j in range(i + 1, len(out)) if out[j] is not None), None)
-        if prev_i is None or next_i is None:
-            continue
-        gap = next_i - prev_i
-        if gap > max_gap:
-            continue
-        t = (i - prev_i) / gap
-        b0 = np.array(out[prev_i], dtype=np.float32)
-        b1 = np.array(out[next_i], dtype=np.float32)
-        out[i] = ((1 - t) * b0 + t * b1).tolist()
-    return out
-
-
-def new_kalman() -> cv2.KalmanFilter:
-    """
-    建立標準 4 狀態 / 2 量測 Kalman 濾波器。
-    狀態向量：[x, y, vx, vy]
-    量測向量：[x, y]
-    """
-    kf = cv2.KalmanFilter(4, 2)
-    kf.measurementMatrix = np.array(
-        [[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
-    kf.transitionMatrix = np.array(
-        [[1, 0, 1, 0], [0, 1, 0, 1],
-         [0, 0, 1, 0], [0, 0, 0, 1]], dtype=np.float32)
-    kf.processNoiseCov = np.eye(4, dtype=np.float32) * 0.01
-    kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 10.0
-    kf.errorCovPost = np.eye(4, dtype=np.float32)
-    return kf

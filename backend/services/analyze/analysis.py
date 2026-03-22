@@ -2,10 +2,10 @@
 後處理分析輔助 (Post-processing Analysis Helpers)
 
 包含：
-  - full_interpolate()          全域球位置線性插值
+  - full_interpolate()          全域位置線性插值（球/球員/手腕）
   - smooth()                    滑動平均平滑
   - compute_frame_speeds_world() 逐幀球速（世界座標，km/h）
-  - detect_events()             速度方向變化 → contact / bounce
+  - detect_events()             手腕距離法擊球 + vy 反轉觸地偵測
   - segment_rallies()           依時間間隔 + 切鏡切割回合
   - find_winner_after()         勝利球落點
   - assign_player()             歸屬球員（top / bottom）
@@ -41,10 +41,10 @@ MIN_BALL_SPEED_KMH = 20.0
 MAX_BALL_SPEED_KMH = 280.0
 
 # ── 事件偵測參數 ───────────────────────────────────────────────────────────────
-COOLDOWN_FRAMES = 15           # 一般事件冷卻（60fps ≈ 0.25s）
-COOLDOWN_AFTER_BOUNCE = 6      # bounce 後接 contact 的較短冷卻（底線擊球落地→擊球間隔短）
-MIN_VEL_CHANGE_RATIO = 0.018   # 相對圖高（像素/幀）速度變化閾值，過低會把雜訊誤判
-MIN_CONTACT_VY = 1.5           # 接觸事件 Y 速度下限（底線水平球路 vy 較小）
+WRIST_HIT_RADIUS = 0.08        # 球距手腕 < 畫面高度 8% → 擊球候選
+WRIST_SEARCH_WINDOW = 5        # 局部最小值搜尋窗口（前後各 N 幀）
+COOLDOWN_FRAMES = 8            # 擊球冷卻（同一球員連續擊球不可能太快）
+BOUNCE_COOLDOWN = 4            # bounce 後接 hit 允許更短冷卻
 
 # ── 回合切割 ──────────────────────────────────────────────────────────────────
 RALLY_GAP_SEC = 3.5            # 回合間隔閾值（秒）；2.5 太短，底線長回合中球追蹤中斷可能超過 2s
@@ -163,73 +163,145 @@ def compute_frame_speeds_world(
 
 def detect_events(
     ball_positions: List[Optional[Tuple[float, float]]],
+    wrist_top: List[Optional[Tuple[float, float]]],
+    wrist_bottom: List[Optional[Tuple[float, float]]],
     player_top: List[Optional[Tuple[float, float]]],
     player_bottom: List[Optional[Tuple[float, float]]],
     img_w: int,
     img_h: int,
     fps: float,
     scene_cut_frames: List[int],
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[List[int], List[int], Dict[int, float]]:
     """
-    速度 Y 方向變化偵測 → 分類為 contact（擊球）或 bounce（落地）。
+    第一性原理事件偵測：球靠近手腕 = 擊球，軌跡反轉且遠離所有人 = 觸地。
 
-    切鏡幀強制重置冷卻計數，使切鏡後可立刻偵測新事件。
+    擊球偵測：
+      1. 逐幀算球到每個球員手腕的距離
+      2. 找距離的局部最小值（前後 WRIST_SEARCH_WINDOW 幀內最小）
+      3. 最小值 < WRIST_HIT_RADIUS（畫面高度 8%）→ 確認為擊球
+
+    觸地偵測：
+      - 球軌跡 vy 由正→負（下→上）反轉且遠離所有球員 → bounce
 
     Returns:
-        (contact_frames, bounce_frames)
+        (contact_frames, bounce_frames, confidence)
     """
-    pos = full_interpolate(ball_positions, max_gap=30, scene_cut_frames=scene_cut_frames)
+    pos = ball_positions  # 已在呼叫端插值
+    n = len(pos)
+    hit_radius = img_h * WRIST_HIT_RADIUS
+    W = WRIST_SEARCH_WINDOW
+    cut_set = set(scene_cut_frames)
 
-    vy: List[Optional[float]] = [None] * len(pos)
-    for i in range(1, len(pos)):
+    # ── 逐幀球到最近手腕的距離 ──────────────────────────────────────────
+    ball_wrist_dist: List[Optional[float]] = [None] * n
+    ball_wrist_player: List[Optional[str]] = [None] * n  # 'top' or 'bottom'
+
+    for i in range(n):
+        bp = pos[i]
+        if bp is None:
+            continue
+        wt = wrist_top[i] if i < len(wrist_top) else None
+        wb = wrist_bottom[i] if i < len(wrist_bottom) else None
+        d_top = _dist2d(bp, wt)
+        d_bot = _dist2d(bp, wb)
+
+        # 手腕漏偵測補償：球在該球員半場 → 用身體中心 fallback
+        if wt is None and i < len(player_top) and player_top[i] is not None:
+            d_top = _dist2d(bp, player_top[i])
+        if wb is None and i < len(player_bottom) and player_bottom[i] is not None:
+            d_bot = _dist2d(bp, player_bottom[i])
+
+        if d_top <= d_bot:
+            ball_wrist_dist[i] = d_top
+            ball_wrist_player[i] = "top"
+        else:
+            ball_wrist_dist[i] = d_bot
+            ball_wrist_player[i] = "bottom"
+
+    # ── vy 計算（用於 bounce 偵測）──────────────────────────────────────
+    vy: List[Optional[float]] = [None] * n
+    for i in range(1, n):
         p0, p1 = pos[i - 1], pos[i]
         if p0 is not None and p1 is not None:
             vy[i] = p1[1] - p0[1]
-
     vy_s = smooth(vy, 3)
-    vel_threshold = img_h * MIN_VEL_CHANGE_RATIO
-    cut_set = set(scene_cut_frames)
 
+    # ── 擊球：球-手腕距離的局部最小值 ──────────────────────────────────
     contacts: List[int] = []
     bounces: List[int] = []
+    confidence: Dict[int, float] = {}
     last_event = -100
-    last_event_type: str = ""   # 'contact' or 'bounce'
+    last_event_type = ""
 
-    for i in range(2, len(vy_s) - 1):
+    for i in range(W, n - W):
         if i in cut_set:
             last_event = -100
             last_event_type = ""
             continue
-        v_prev = vy_s[i - 1]
-        v_curr = vy_s[i]
-        if v_prev is None or v_curr is None:
-            continue
-        # bounce→contact 允許更短冷卻，其餘維持標準冷卻
-        effective_cooldown = (COOLDOWN_AFTER_BOUNCE
-                              if last_event_type == "bounce"
-                              else COOLDOWN_FRAMES)
-        if i - last_event < effective_cooldown:
+
+        d = ball_wrist_dist[i]
+        if d is None or d > hit_radius:
             continue
 
-        reversed_y = (v_prev * v_curr) < 0
-        if not reversed_y and abs(v_curr - v_prev) < vel_threshold:
+        # 冷卻
+        eff_cd = BOUNCE_COOLDOWN if last_event_type == "bounce" else COOLDOWN_FRAMES
+        if i - last_event < eff_cd:
             continue
 
-        # 球的實際速度太小（靜止雜訊），跳過
-        if max(abs(v_prev), abs(v_curr)) < MIN_CONTACT_VY:
+        # 局部最小值檢查：前後 W 幀內 d[i] 是否最小
+        is_local_min = True
+        for j in range(i - W, i + W + 1):
+            if j == i:
+                continue
+            dj = ball_wrist_dist[j]
+            if dj is not None and dj < d:
+                is_local_min = False
+                break
+
+        if not is_local_min:
             continue
 
-        ball_pos = pos[i]
-        if ball_pos is None:
-            continue
-
-        # 所有方向反轉皆視為 contact 候選，交由 VLM 驗證是否為揮拍或落地反彈。
-        # 不使用 proximity 判斷，避免遠端球員（pose 偵測不穩定）被誤歸 bounce。
+        conf = min(0.95, 0.5 + 0.5 * (1.0 - d / hit_radius))
         contacts.append(i)
+        confidence[i] = conf
         last_event_type = "contact"
         last_event = i
 
-    return contacts, bounces
+        player = ball_wrist_player[i] or "?"
+        print(f"  [hit] f={i} t={i/fps:.2f}s player={player} "
+              f"d_wrist={d:.0f} radius={hit_radius:.0f}")
+
+    # ── 觸地：vy 反轉（下→上）且遠離所有球員 ──────────────────────────
+    for i in range(2, n - 1):
+        if i in cut_set:
+            continue
+        bp = pos[i]
+        if bp is None:
+            continue
+        vy_prev, vy_curr = vy_s[i - 1], vy_s[i]
+        if vy_prev is None or vy_curr is None:
+            continue
+        # 下→上反轉（image Y: vy 正→負）
+        if not (vy_prev > 0.5 and vy_curr < -0.5):
+            continue
+        # 不能太靠近已偵測的擊球
+        if any(abs(i - c) < COOLDOWN_FRAMES for c in contacts):
+            continue
+        # 不能太靠近其他 bounce
+        if any(abs(i - b) < BOUNCE_COOLDOWN for b in bounces):
+            continue
+        # 遠離所有球員
+        d = ball_wrist_dist[i]
+        if d is not None and d < hit_radius * 2:
+            continue
+
+        bounces.append(i)
+        confidence[i] = 0.85
+        print(f"  [bounce] f={i} t={i/fps:.2f}s "
+              f"d_nearest={f'{d:.0f}' if d is not None else 'inf'}")
+
+    print(f"[detect_events] {len(contacts)} hits, {len(bounces)} bounces")
+    return contacts, bounces, confidence
 
 
 # ─────────────────────────────────────────────────────────────────────────────

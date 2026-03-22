@@ -50,28 +50,62 @@ def _passes_filter(x1: float, y1: float, x2: float, y2: float,
     return True
 
 
+# COCO keypoint indices
+_KP_L_WRIST = 9
+_KP_R_WRIST = 10
+
+
+def _extract_wrists(kp: list) -> Optional[Tuple[float, float]]:
+    """從 17-keypoint 列表取左右手腕中較高信心的座標，都低於 0.3 則回傳 None。"""
+    lw = kp[_KP_L_WRIST]  # (x, y, conf)
+    rw = kp[_KP_R_WRIST]
+    best = lw if lw[2] >= rw[2] else rw
+    if best[2] < 0.3:
+        return None
+    return (best[0], best[1])
+
+
+def detect_pose(
+    model,
+    frame: np.ndarray,
+    frame_draw: np.ndarray,
+    img_w: int,
+    img_h: int,
+    court_corners: Optional[np.ndarray] = None,
+    net_y: Optional[float] = None,
+) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]],
+           Optional[Tuple[float, float]], Optional[Tuple[float, float]]]:
+    """Pose 偵測 + 球員歸屬 + 骨架繪製。
+
+    Returns:
+        (top_pos, bot_pos, top_wrist, bot_wrist)
+        pos = 身體中心 (cx, cy)，wrist = 持拍手腕 (x, y)，偵測失敗為 None。
+    """
+    results = model.predict(source=frame, imgsz=1280, conf=0.01, verbose=False)
+    pose_r = results[0] if results else None
+    top_pos, bot_pos, top_wrist, bot_wrist = detect_players(
+        pose_r, img_w, img_h, court_corners, net_y)
+    draw_skeleton(frame_draw, pose_r, img_h, court_corners)
+    return top_pos, bot_pos, top_wrist, bot_wrist
+
+
 def detect_players(
     pose_r,
     img_w: int,
     img_h: int,
     court_corners: Optional[np.ndarray] = None,
     net_y: Optional[float] = None,
-) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]:
+) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]],
+           Optional[Tuple[float, float]], Optional[Tuple[float, float]]]:
     """
-    從 Pose result 同時偵測上方（far side）與下方（near side）球員中心。
-
-    篩選優先順序：
-      1. 面積過小或完全在頂部 5% → 丟棄
-      2. 有效 keypoint 數 < 6 → 丟棄
-      3. 若有 court_corners：腳底中心 x 在場地邊線以外（含 10% 容差）→ 丟棄
-      4. 以 net_y（有則用）或 img_h*0.5（退回）區分上下球員
-      5. 各半場取面積最大者
+    從 Pose result 偵測上方 / 下方球員中心與手腕座標。
 
     Returns:
-        (top_center, bottom_center) 各為 (cx, cy) 或 None。
+        (top_center, bottom_center, top_wrist, bottom_wrist)
+        center = (cx, cy)，wrist = (x, y)，偵測失敗為 None。
     """
     if pose_r is None or getattr(pose_r, "keypoints", None) is None:
-        return None, None
+        return None, None, None, None
 
     kps_list = pose_r.keypoints.data.cpu().tolist()
     bx_list = pose_r.boxes.xyxy.cpu().tolist()
@@ -85,7 +119,9 @@ def detect_players(
             continue
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
-        entry = {"cx": cx, "cy": cy, "area": (x2 - x1) * (y2 - y1)}
+        wrist = _extract_wrists(kp)
+        entry = {"cx": cx, "cy": cy, "area": (x2 - x1) * (y2 - y1),
+                 "wrist": wrist}
         if y2 < split_y:
             upper.append(entry)
         else:
@@ -95,8 +131,10 @@ def detect_players(
     _bot = max(lower, key=lambda c: c["area"]) if lower else None
     top = (_top["cx"], _top["cy"]) if _top else None
     bot = (_bot["cx"], _bot["cy"]) if _bot else None
+    top_w = _top["wrist"] if _top else None
+    bot_w = _bot["wrist"] if _bot else None
 
-    return top, bot
+    return top, bot, top_w, bot_w
 
 
 
