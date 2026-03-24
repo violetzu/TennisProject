@@ -4,8 +4,8 @@
 @theme {
   --font-sans: "Noto Sans TC", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 
-  --color-player-top: #4FC3F7;
-  --color-player-bottom: #FFB74D;
+  --color-player-top: #4ADE80;
+  --color-player-bottom: #FDE047;
 
   --breakpoint-tablet: 960px;
 }

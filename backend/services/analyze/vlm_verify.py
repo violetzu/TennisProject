@@ -1,8 +1,8 @@
 """
 VLM 回合勝負判斷模組
 
-Phase 1 decode 迴圈中每 THUMB_STRIDE 幀儲存縮圖到 thumb_dir；
-Phase 3 對每個回合的最後一拍後取縮圖，由 VLM 判斷得分方。
+偵測迴圈中每 THUMB_STRIDE 幀儲存縮圖到 thumb_dir；
+分析階段對每個回合的最後一拍後取縮圖，由 VLM 判斷得分方。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ _SYSTEM_PROMPT = (
 # ── 縮圖工具 ──────────────────────────────────────────────────────────────────
 
 def save_thumbnail(frame: np.ndarray, thumb_dir: Path, idx: int) -> None:
-    """在 Phase 1 decode 迴圈中每 THUMB_STRIDE 幀呼叫一次，儲存原始幀縮圖。"""
+    """在偵測迴圈中每 THUMB_STRIDE 幀呼叫一次，儲存原始幀縮圖。"""
     small = cv2.resize(frame, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
     cv2.imwrite(
         str(thumb_dir / f"frame_{idx:06d}.jpg"),

@@ -79,7 +79,7 @@ export default function CourtTab({ data }: { data: any }) {
         <line x1={wx(COURT_W / 2)} y1={wy(NET_Y_M + SRV_DIST)} x2={wx(COURT_W / 2)} y2={wy(NET_Y_M - SRV_DIST)} stroke="#fff" strokeWidth="1" />
         {/* 落地點 */}
         {landingPoints.map((p, i) => (
-          <circle key={`l-${i}`} cx={wx(p.x)} cy={wy(p.y)} r="3" fill={p.hitter === "top" ? "rgba(79,195,247,0.75)" : "rgba(255,183,77,0.75)"} />
+          <circle key={`l-${i}`} cx={wx(p.x)} cy={wy(p.y)} r="3" fill={p.hitter === "top" ? "rgba(74,222,128,0.75)" : "rgba(253,224,71,0.75)"} />
         ))}
         {/* 勝利球落點 */}
         {(data.rallies ?? [])

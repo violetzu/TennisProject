@@ -1,17 +1,19 @@
 """
-Phase 4：統計彙整 (Aggregate)
+統計彙整 (Aggregate)
 
-將 Phase 2/3 的偵測結果轉換為最終 JSON 結構。
-純數據轉換，不依賴模型或 FFmpeg。
+將分析結果轉換為最終 JSON 結構。
+純數據格式化，判斷邏輯由 analysis.py 提供。
 """
 
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
+from .court import project_to_world
 from .analysis import (
-    MIN_BALL_SPEED_KMH, _NET_Y_M,
-    bounce_zone, player_court_zone, project_to_world,
+    MIN_BALL_SPEED_KMH,
+    assign_court_side, bounce_zone, find_serve_index,
+    find_winner_landing, player_court_zone,
 )
 
 
@@ -58,19 +60,9 @@ def build_rallies(
             if smooth_speeds[j] is not None and smooth_speeds[j] >= MIN_BALL_SPEED_KMH]
         return round(max(peaks), 1) if peaks else None
 
-    def _court_side_player(fi: int) -> str:
-        bp_ = pos_interp[fi] if fi < len(pos_interp) else None
-        if bp_ is not None and last_valid_H is not None:
-            w = project_to_world(bp_, last_valid_H)
-            if w is not None:
-                return "bottom" if w[1] < _NET_Y_M else "top"
-        if bp_ is not None:
-            return "bottom" if bp_[1] > height * 0.5 else "top"
-        tp_ = all_player_top[fi] if fi < len(all_player_top) else None
-        bp2 = all_player_bottom[fi] if fi < len(all_player_bottom) else None
-        if tp_ and bp2:
-            return "top" if tp_[1] < bp2[1] else "bottom"
-        return "top" if tp_ else "bottom"
+    def _side(fi: int) -> str:
+        return assign_court_side(fi, pos_interp, all_player_top, all_player_bottom,
+                                 last_valid_H, height)
 
     # ── 累計器 ──────────────────────────────────────────────────────────────
     player_stats: Dict = {
@@ -101,29 +93,22 @@ def build_rallies(
         next_start = (rally_groups[rally_idx + 1][0]
                       if rally_idx + 1 < len(rally_groups) else None)
 
-        # 回合內 bounce
-        r_end_f = (next_start - 1) if next_start else total_frames
-        rally_bounces_f = [b for b in bounces_f
-                           if rally_contacts[0] <= b <= r_end_f]
+        # ── 發球偵測 ──────────────────────────────────────────────────────
+        serve_idx = find_serve_index(
+            rally_contacts, pos_interp, all_player_top, all_player_bottom,
+            last_valid_H, height, fps)
 
-        # 發球者
-        server = _court_side_player(rally_contacts[0])
+        _contacts_work = list(rally_contacts[serve_idx:])
+        if serve_idx > 0:
+            print(f"[SERVE] rally#{rally_idx+1} skipped {serve_idx} pre-serve event(s), "
+                  f"actual serve f={_contacts_work[0]}({_contacts_work[0]/fps:.2f}s)")
+
+        server = _side(_contacts_work[0])
         player_stats[server]["serves"] += 1
 
-        # ── 發球前置過濾 ────────────────────────────────────────────────────
-        _MAX_SERVE_BUILDUP_S = 5.0
-        _contacts_work: List[int] = list(rally_contacts)
-        _pre_serve_n = 0
-        for _fi in rally_contacts:
-            if ((_fi - rally_contacts[0]) / fps <= _MAX_SERVE_BUILDUP_S
-                    and _court_side_player(_fi) == server):
-                _pre_serve_n += 1
-            else:
-                break
-        if _pre_serve_n >= 2:
-            _contacts_work = list(rally_contacts[_pre_serve_n - 1:])
-            print(f"[SERVE] rally#{rally_idx+1} merged {_pre_serve_n-1} pre-serve event(s), "
-                  f"actual serve f={_contacts_work[0]}({_contacts_work[0]/fps:.2f}s)")
+        r_end_f = (next_start - 1) if next_start else total_frames
+        rally_bounces_f = [b for b in bounces_f
+                           if _contacts_work[0] <= b <= r_end_f]
 
         # ── 逐拍 shots ──────────────────────────────────────────────────────
         shots_out: List[Dict] = []
@@ -132,7 +117,7 @@ def build_rallies(
             if ball_pos is None:
                 continue
 
-            player = _court_side_player(fi)
+            player = _side(fi)
             is_serve = (seq == 0)
             shot_type = "serve" if is_serve else vlm_shot_types.get(fi, "unknown")
             speed = _get_speed_after(fi)
@@ -229,7 +214,7 @@ def build_rallies(
             else:
                 heatmap_bounces.append({"x": x_n, "y": y_n, "coord": "pixel"})
 
-        # ── 勝負 + 勝利球落點 ───────────────────────────────────────────────
+        # ── 勝負 ──────────────────────────────────────────────────────────
         winner_player: Optional[str] = vlm_winner_results.get(rally_idx)
         if winner_player in ("top", "bottom"):
             player_stats[winner_player]["winners"] += 1
@@ -239,45 +224,11 @@ def build_rallies(
         outcome_type = ("winner" if winner_player in ("top", "bottom") else
                         "scene_cut" if cut_near else "unknown")
 
-        # 勝利球落點：最後一拍後，在對方半場的第一個彈跳（bounce）
-        # 落點 = 球碰到場地的彈跳位置；因為對手未能回擊才成為勝利落點
         winner_land: Optional[Dict] = None
         if winner_player in ("top", "bottom") and last_valid_H is not None:
-            last_fi = rally_contacts[-1]
-            # 1) 優先從 bounces_f 找最後一拍之後的彈跳
-            for bf in bounces_f:
-                if bf <= last_fi:
-                    continue
-                if next_start and bf >= next_start:
-                    break
-                bpos = pos_interp[bf] if bf < len(pos_interp) else None
-                if bpos is None:
-                    continue
-                bw = project_to_world(bpos, last_valid_H)
-                if bw is None:
-                    continue
-                in_opp = (bw[1] > _NET_Y_M) if winner_player == "bottom" else (bw[1] < _NET_Y_M)
-                if in_opp:
-                    winner_land = {"x": round(bw[0], 2), "y": round(bw[1], 2)}
-                    break
-
-            # 2) 無彈跳資料時 fallback：最後一拍後在對方半場的第一個球位置
-            if winner_land is None:
-                end_fi = min(
-                    (next_start - 1) if next_start else total_frames,
-                    last_fi + int(fps * 3),
-                )
-                for _fi in range(last_fi + 3, end_fi):
-                    _bp = pos_interp[_fi] if _fi < len(pos_interp) else None
-                    if _bp is None:
-                        continue
-                    _bw = project_to_world(_bp, last_valid_H)
-                    if _bw is None:
-                        continue
-                    in_opp = (_bw[1] > _NET_Y_M) if winner_player == "bottom" else (_bw[1] < _NET_Y_M)
-                    if in_opp:
-                        winner_land = {"x": round(_bw[0], 2), "y": round(_bw[1], 2)}
-                        break
+            winner_land = find_winner_landing(
+                winner_player, rally_contacts, bounces_f, pos_interp,
+                next_start, total_frames, last_valid_H, fps)
 
         rallies_out.append({
             "id": rally_idx + 1,

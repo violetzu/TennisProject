@@ -26,6 +26,8 @@ SKELETON_LINKS = [
     [11, 13], [13, 15], [12, 14], [14, 16],
 ]
 
+from .constants import COLOR_TOP, COLOR_BOTTOM
+
 
 def _inside_court(cx: float, feet_y: float,
                   court_corners: np.ndarray, margin: float = 15.0) -> bool:
@@ -68,25 +70,35 @@ def _extract_wrists(kp: list) -> Optional[Tuple[float, float]]:
 def detect_pose(
     model,
     frame: np.ndarray,
-    frame_draw: np.ndarray,
     img_w: int,
     img_h: int,
     court_corners: Optional[np.ndarray] = None,
     net_y: Optional[float] = None,
 ) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]],
-           Optional[Tuple[float, float]], Optional[Tuple[float, float]]]:
-    """Pose 偵測 + 球員歸屬 + 骨架繪製。
+           Optional[Tuple[float, float]], Optional[Tuple[float, float]],
+           List[Tuple[list, str]]]:
+    """Pose 偵測 + 球員歸屬。不畫圖，回傳骨架資料供延後繪製。
 
     Returns:
-        (top_pos, bot_pos, top_wrist, bot_wrist)
-        pos = 身體中心 (cx, cy)，wrist = 持拍手腕 (x, y)，偵測失敗為 None。
+        (top_pos, bot_pos, top_wrist, bot_wrist, skeleton_data)
+        skeleton_data: [(keypoints, side), ...] side='top'|'bottom'
     """
     results = model.predict(source=frame, imgsz=1280, conf=0.01, verbose=False)
     pose_r = results[0] if results else None
     top_pos, bot_pos, top_wrist, bot_wrist = detect_players(
         pose_r, img_w, img_h, court_corners, net_y)
-    draw_skeleton(frame_draw, pose_r, img_h, court_corners)
-    return top_pos, bot_pos, top_wrist, bot_wrist
+    # 提取過濾後的骨架資料（延後到寫入時才畫）
+    skel_data: List[Tuple[list, str]] = []
+    if pose_r is not None and getattr(pose_r, "keypoints", None) is not None:
+        kps_list = pose_r.keypoints.data.cpu().tolist()
+        bx_list = pose_r.boxes.xyxy.cpu().tolist()
+        split_y = net_y if net_y is not None else img_h * 0.50
+        for box, kps in zip(bx_list, kps_list):
+            x1, y1, x2, y2 = box[:4]
+            if _passes_filter(x1, y1, x2, y2, kps, img_h, court_corners):
+                side = "top" if y2 < split_y else "bottom"
+                skel_data.append((kps, side))
+    return top_pos, bot_pos, top_wrist, bot_wrist, skel_data
 
 
 def detect_players(
@@ -138,26 +150,16 @@ def detect_players(
 
 
 
-def draw_skeleton(frame: np.ndarray, pose_r,
-                  img_h: int,
-                  court_corners: Optional[np.ndarray] = None) -> None:
-    """在 frame 上繪製通過篩選球員的綠色骨架（就地修改）。"""
-    if pose_r is None or getattr(pose_r, "keypoints", None) is None:
-        return
-
-    kps_list = pose_r.keypoints.data.cpu().tolist()
-    bx_list = pose_r.boxes.xyxy.cpu().tolist()
-
-    for box, kps in zip(bx_list, kps_list):
-        x1, y1, x2, y2 = box[:4]
-        if not _passes_filter(x1, y1, x2, y2, kps, img_h, court_corners):
-            continue
+def draw_skeleton_from_data(frame: np.ndarray, skel_data: List[Tuple[list, str]]) -> None:
+    """用預存的骨架資料繪製骨架，上方球員綠色、下方球員黃色（就地修改）。"""
+    for kps, side in skel_data:
+        color = COLOR_TOP if side == "top" else COLOR_BOTTOM
         for (x, y, conf) in kps:
             if conf >= 0.3:
-                cv2.circle(frame, (int(x), int(y)), 4, (0, 255, 0), -1)
+                cv2.circle(frame, (int(x), int(y)), 4, color, -1)
         for i, j in SKELETON_LINKS:
             if kps[i][2] >= 0.3 and kps[j][2] >= 0.3:
                 cv2.line(frame,
                          (int(kps[i][0]), int(kps[i][1])),
                          (int(kps[j][0]), int(kps[j][1])),
-                         (0, 255, 0), 2)
+                         color, 2)

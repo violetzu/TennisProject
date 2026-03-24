@@ -28,8 +28,9 @@ _NET_Y_M        = COURT_LENGTH_M / 2                         # 11.885 m
 SINGLES_WIDTH_M = 8.23
 _SINGLES_L_X    = (DOUBLES_WIDTH_M - SINGLES_WIDTH_M) / 2   # 1.37 m
 _SINGLES_R_X    = DOUBLES_WIDTH_M - _SINGLES_L_X            # 9.60 m
-_SERVICE_Y_NEAR = _NET_Y_M - 6.40                           # 5.485 m（近端發球線）
-_SERVICE_Y_FAR  = _NET_Y_M + 6.40                           # 18.385 m（遠端發球線）
+_SERVICE_DIST_M = 6.40                                      # 球網到發球線距離
+_SERVICE_Y_NEAR = _NET_Y_M - _SERVICE_DIST_M                # 5.485 m（近端發球線）
+_SERVICE_Y_FAR  = _NET_Y_M + _SERVICE_DIST_M                # 18.285 m（遠端發球線）
 _CENTER_X       = DOUBLES_WIDTH_M / 2.0                     # 5.485 m（中線）
 
 # 所有需要 perspectiveTransform 投影的場地線段（世界座標對）
@@ -90,7 +91,23 @@ _KP_LINE_PAIRS = [
     # 中線：H補算上端，kp[12] 為下端 → 見 draw_court
 ]
 
-COURT_CONF_TH = 0.8  # 場地偵測最低信心值
+COURT_CONF_TH = 0.9  # 場地偵測最低信心值 球場不動的話0.95就夠用
+
+
+def project_to_world(
+    pos: Tuple[float, float],
+    H: np.ndarray,
+) -> Optional[Tuple[float, float]]:
+    """
+    將像素座標投影到世界公尺座標（H: img→world）。
+    世界系統：BL=(0,0), BR=(10.97,0), TL=(0,23.77), TR=(10.97,23.77)，網 Y=11.885m。
+    """
+    try:
+        pt = np.array([[[pos[0], pos[1]]]], dtype=np.float32)
+        wpt = cv2.perspectiveTransform(pt, H)
+        return (float(wpt[0, 0, 0]), float(wpt[0, 0, 1]))
+    except Exception:
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
