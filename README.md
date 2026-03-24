@@ -1,181 +1,177 @@
-# Tennis LLM Analysis Platform
+# TennisProject
 
-網球影片分析系統，整合 YOLO 物體偵測與 Qwen3-VL 大視覺模型進行網球比賽分析。
+Upload a tennis match video, and the system automatically detects players, tracks the ball, identifies every shot and rally, then generates an annotated video and detailed match statistics — all in one click.
 
-本專案聚焦於：
-- 影片事件解析
-- 球路與動作理解
-- 結合視覺 LLM 進行語意層級分析
+## What It Does
 
-> ⚠️ LLM 相關 prompt 與 payload 目前仍在持續調整與優化中。
+### Annotated Video Output
 
-## 快速導覽
-### [Docker Compose 快速啟動](#docker-compose-快速啟動)
-### [系統架構](#系統架構)
-### [技術棧](#技術棧)
-### [檔案架構](#檔案架構)
+The system overlays the original video with:
 
+- **Court lines** — detected via keypoint model, projected onto the frame
+- **Player skeletons** — top player in green, bottom player in yellow
+- **Ball trail** — color follows the player who last hit the ball, with smooth gradient transitions at each contact point
 
-## 🏗️ 系統架構
-### 本專案架構部分設計與流程參考自以下專案：
+### Rally & Shot Statistics
 
-### [![GitHub Repo](https://img.shields.io/badge/GitHub-CourtSight--AI-black?logo=github)](https://github.com/Ray-1214/CourtSight-AI)
+One-click analysis produces a full match breakdown:
 
+| Tab | What You See |
+|---|---|
+| **Rally** | Each rally listed with shot count, duration, server, and per-shot details (player, type, speed). Click any shot to jump to that moment in the video. |
+| **Player** | Per-player stats: total shots, serves, winners, shot type distribution |
+| **Depth** | Court position distribution — how often each player was at the net, service line, or baseline |
+| **Speed** | Ball speed stats (avg/max/min) for all shots, serves, and rally balls |
+| **Court** | SVG court diagram with shot landing heatmap and winner landing markers |
 
+### AI Chat
 
-```mermaid
+Ask questions about the match in natural language. The Vision-Language Model (Qwen) has access to both the video and the full analysis JSON, enabling answers like:
+
+- *"Who had better court coverage?"*
+- *"Summarize the longest rally"*
+- *"Which player served faster on average?"*
+
+### Account & History
+
+- **Registered users** — manage multiple videos, revisit past analyses, re-analyze with updated models
+- **Guest mode** — no login required; upload and analyze immediately (auto-expires after 7 days)
+
+## How It Works
 
 ```
-
-## ⚙️ 技術棧
-
-- **影片處理**：OpenCV
-- **物體偵測**：YOLOv8, YOLOv11
-- **視覺 LLM**：Qwen3-VL-8B-Instruct
-- **後端框架**：FastAPI + Uvicorn
-- **前端**：next.js
-- **容器化**：Docker
-
-## 📁 檔案架構
-```
-TennisProject/
-├── .env                                # 環境變數設定(全域最優先)
-├── backend/                            # 後端資料夾
-│   ├── app.py                          # FastAPI 應用程式入口
-│   ├── config.py                       # 環境變數設定
-│   ├── requirements.txt                # Python 依賴
-│   ├── tennis_prompt.txt               # LLM 系統提示詞
-│   ├── videos/                         # 上傳影片目錄
-│   │
-│   ├── models/                         # 預訓練模型
-│   │   ├── download.sh                 # 模型下載腳本
-│   │   ├── ball/                       # 網球偵測模型
-│   │   ├── person/                     # 人物姿態估計模型
-│   │   ├── court/                      # 網球場偵測模型
-│   │   ├── bounce/                     # 觸地偵測模型
-│   │   └── ...                         # pipeline 使用之模型
-│   ├── routers/                        # FastAPI 路由
-│   │   ├── chat_router.py              # 左側大模型呼叫
-│   │   ├── video_router.py             # 影片上傳及分析
-│   │   └── lifespan.py                 # 初始化、定期清理上傳檔案
-│   │
-│   └── services                        # 分析相關程式
-│       ├── analyze/                    # yolo 分析相關程式 ( 目前由 video_router 內程式呼叫，直接回傳影片路徑)
-│       │   ├── analyze_video_with_yolo.py  # 主程式
-│       │   ├── CW_action_test.py
-│       │   └── utils.py
-│       │
-│       └── pipeline/                   # pipeline 分析相關程式 ( 目前由 video_router 內程式呼叫，直接回傳json路徑)
-│           ├── main.py                 # pipeline 主程式
-│           └── ...
-│
-├── frontend/                           # Next.js 前端
-│   ├── .next/                          # Next.js build 產物（自動生成）
-│   ├── node_modules/                   # 套件資料夾
-│   ├── app/                            # Next.js App Router 入口（路由、Layout、全域樣式）
-│   │   ├── layout.tsx                  # 根 Layout（HTML、body、主題切換、字型、共用結構）
-│   │   ├── page.tsx                    # 首頁（組裝 Chat / Analysis / Video ）
-│   │   └── globals.css                 # 全域樣式
-│   │
-│   ├── components/                     # UI 元件
-│   │   ├── AnalysisPanel.tsx           # 分析結果面板（回合/球員/深度/速度/落點）
-│   │   ├── ChatPanel.tsx               # 聊天面板（訊息列表＋輸入框）
-│   │   ├── ThemeToggle.tsx             # 明亮 / 暗黑模式切換
-│   │   └── VideoPanel.tsx              # 影片主面板（控制卡 + 影片預覽）
-│   │
-│   ├── hooks/                          # 自訂 React Hooks（邏輯集中管理）
-│   │   ├── useChat.ts                  # 與 LLM 後端對話（send / messages / busy）
-│   │   ├── usePipelineStatus.ts        # 輪詢 Pipeline 分析狀態 + worldData
-│   │   ├── useVideoUpload.ts           # 影片切片上傳 + 平滑進度計算
-│   │   ├── useYoloStatus.ts            # 輪詢 YOLO 分析狀態（progress / video_url）
-│   │   └── useVideoPanelController.ts  # 統一管理 VideoPanel 流程(上傳 / YOLO 分析 / Pipeline 分析 / 鎖定所有按鈕 / 共用狀態列 / 進度條)
-│   │
-│   ├── public/                         # 靜態資源 
-│   ├── .gitignore
-│   ├── eslint.config.mjs               
-│   ├── next-env.d.ts
-│   ├── next.config.js                  # Next.js 設定 (反向代理設定)
-│   ├── package.json                    # 專案套件與 scripts
-│   ├── package-lock.json
-│   ├── postcss.config.mjs
-│   └── tsconfig.json                   # TypeScript 設定
-│
-└── .gitignore
+Upload video → Court Detection → Pose Estimation → Ball Tracking
+  → Sliding Window (outlier filtering + interpolation)
+  → Rally-Aware Rendering (buffer rally frames → detect events → color ball trail → encode)
+  → Event Detection → Rally Segmentation → VLM Winner Judgment
+  → Annotated MP4 + Analysis JSON
 ```
 
-## 🔗 相關連結
+Key technical highlights:
 
-- [Google Drive (模型和測試影片)](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
-- [Roboflow 網球資料集](https://universe.roboflow.com/viren-dhanwani/tennis-ball-detection/dataset/6)
+- **Single-pass pipeline** — detection, filtering, rendering, and encoding happen in one streaming pass (FFmpeg decode → process → FFmpeg encode)
+- **Rally-aware buffering** — frames during active rallies are buffered in memory; when a rally ends, `detect_events` runs on the segment to determine precise ball ownership before drawing the trail
+- **Sliding window** — 30-frame delay ensures ball positions are filtered and interpolated before being finalized (outlier removal, gap interpolation with direction checking)
+- **No duplicate computation** — per-rally event results are accumulated and reused for the final analysis, avoiding a redundant full-video pass
 
-## 📄 world_json / worldData 說明
-### 後端欄位定位
-- `AnalysisRecord.world_json_path` / `video_json_path` 為 pipeline 產生的 JSON 檔案絕對路徑，分別記錄世界座標資訊與影格事件資訊（儲存在資料夾 `data/world_info_{basename}.json`、`data/video_info_{basename}.json`）。
-- `world_data` 欄位（JSON 型別）以及 session store 的 `worldData` 用來保存已解析的 world_json 內容，API 層會直接回傳這份資料給前端，不需前端讀檔案路徑。
+## System Requirements
 
-### JSON 檔案內容與來源
-1. `backend/services/pipeline/main.py` 執行時會輸出 `world_info_{basename}.json`，包含：
-   - 每個 frame 的球員、球、球場關鍵點在「世界座標系」下的座標與時間戳。
-   - `metadata`：例如 fps、場地尺寸、攝影機標定參數等供後續分析使用。
-2. `analyze_router` 在 pipeline 完成後會開啟對應的 JSON 檔案並寫入 session store，同步更新 `AnalysisRecord.world_data`，使後續 `/api/status/{session_id}` 查詢即可取得解析後的 `worldData`。
+### GPU (VRAM)
 
-### 前端資料流
-1. 前端透過 `usePipelineStatus` 輪詢 `/api/status/:sessionId`，當 `pipeline_status === "completed"` 且回傳體內含 `worldData` 時才停止輪詢並儲存該資料。
-2. `AnalysisPanel`、`AnalysisPanel` 內部輔助 hook（如 `useRallyAnalysis`）只會讀取 `worldData` 中的 frames/metadata 等資訊進行視覺化分析，完全不會操作 `world_json_path` 或 `video_json_path`。
+| Component | VRAM | Note |
+|---|---|---|
+| YOLO models (ball + pose + court) | ~2 GB | Always required. Three small models run on the same GPU. |
+| vLLM — Qwen3-VL-**2B** | ~6 GB | Minimum for AI chat |
+| vLLM — Qwen3-VL-**8B** | ~20 GB | Recommended for quality |
+| vLLM — Qwen3.5-**27B**-FP8 | ~30 GB | Best quality, needs A100/4090+ |
 
-### 驗證建議
-- 實際跑一次 pipeline，確認 `/api/status/:sessionId` 在狀態完成前皆無 `worldData`，完成後才帶入完整 payload。
-- 在前端檢查 React 元件狀態，確認 `worldData` 只在 pipeline 完成時更新，且元件無任何硬編碼的檔案路徑依賴。
+YOLO and vLLM share the same GPU. For a 24 GB card (e.g. RTX 4090), use the 8B model with `gpu-memory-utilization 0.85`.
 
-### 前後端計算責任
-- 後端 pipeline：負責進行重運算（姿態估計、物件追蹤、球速計算、事件偵測），並將結果寫入 `world_info_*.json`／`video_info_*.json`，其中 `frames[].events`、`ball.world`、`ball.speed`、`time` 與 `metadata.fps` 等欄位都在這裡預先算好。
-- 前端 `AnalysisPanel`：載入 `worldData` 後，以 `useRallyAnalysis` 在瀏覽器計算輕量統計。例如依 `events` 重建回合列表、依 `ball.world` 判斷球員側向、統計擊球深度分布、整理速度最大/平均值以及 court heatmap。所有這些都是純前端計算，未再呼叫後端。
-- 分工總結：後端提供「每一影格的世界座標與事件資料」；前端只針對這些現成欄位做視覺化所需的整理，不會重新執行偵測或寫檔。
+**No local GPU for VLM?** The system doesn't require a built-in vLLM instance. You can point `APP_VLLM_URL` in `.env` to any OpenAI-compatible API endpoint (e.g. a remote server, cloud GPU, or third-party API). Rally winner judgment and AI chat both go through this endpoint. Without any VLM configured, analysis still runs — but rally win/loss judgment and AI chat will be unavailable.
 
-### 計算確認方式
-- 後端：完成一次 pipeline 後抓 `/api/status/:sessionId`，檢查 JSON 內已有 `frames[].events`、`ball.speed` 等欄位。
-- 前端：在瀏覽器 DevTools 觀察 `AnalysisPanel` 或 `useRallyAnalysis` 的結果（可加 log 或使用 React DevTools）確定所有統計皆由前端函式計算得出。
+### RAM
 
+| Source | Memory | Note |
+|---|---|---|
+| Base (backend + FFmpeg) | ~2 GB | Python process + decode/encode pipes |
+| Rally frame buffer | **~6 MB × rally length (frames)** | 1080p frame = 1920×1080×3 ≈ 5.93 MB. A 10-second rally at 60fps (600 frames) ≈ **3.6 GB**. Freed after each rally flush. |
+| Position arrays | ~50 MB per 10k frames | `all_ball_positions`, `all_player_*`, `all_wrist_*`, `all_ball_owner` |
 
-#  Docker Compose 快速啟動
-## 1. 下載程式
+**Recommendation: 16 GB+ RAM.** Long rallies (15s+) at 1080p60 can peak at 5+ GB for the frame buffer alone. Lower resolution reduces memory proportionally (720p ≈ 2.7 MB/frame).
+
+### Disk
+
+- Uploaded videos + annotated output (2× original size)
+- vLLM model cache (`data/huggingface/`): 5–60 GB depending on model
+- MySQL data: minimal
+
+## Quick Start
+
+### 1. Clone & download models
+
 ```sh
 git clone https://github.com/violetzu/TennisProject.git
 cd TennisProject/
-```
-
-## 2. 下載模型/
-### 下載人模型
-```sh
 bash ./backend/models/download.sh
 ```
-### 下載球模型
->https://drive.google.com/file/d/1Ca7riJgmfSxZRxafuUprcscp7bF75ARn/view?usp=sharing
-放到`backend/models/ball/`
 
-## 3. 使用建議.env 或自行修改
+Trained model weights (ball, court) should be placed under `backend/models/`. Model paths are configured in `backend/config.py`. See [Model Training](#model-training) for dataset sources and training scripts.
+
+### 2. Configure
+
 ```sh
 cp .env.example .env
 ```
-> 前端要使用開發模式(npm run dev)的話 : FRONTEND_DEV_MODE=true
 
-> 後端要使用開發模式(--reload)的話 : BACKEND_DEV_MODE=true
+| Variable | Note |
+|---|---|
+| `APP_VLLM_MODEL` | VLM model name. `Qwen/Qwen3-VL-8B-Instruct` needs ~30 GB VRAM. Try 2B/4B for smaller GPUs. |
+| `FRONTEND_DEV_MODE` | `true` = `npm run dev` with hot reload |
+| `BACKEND_DEV_MODE` | `true` = uvicorn `--reload` |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Leave empty if not exposing externally |
 
-> VLLM_MODEL : VLLM 載入 Qwen/Qwen3-VL-8B-Instruct 大約會使用30G記憶體，如果是一般顯卡可以從2B、4B往上嘗試 ， 不使用可以無視
+### 3. Run
 
-> CLOUDFLARE_TUNNEL_TOKEN : 沒有使用可以直接留空
-
-## 4. 執行程式
-### 使用vLLM
 ```sh
+# With VLM (GPU required)
 docker compose --profile vllm up -d --build
-```
-### 不使用vLLM
-```sh
+
+# Without VLM (analysis works, AI chat disabled)
 docker compose up -d --build
 ```
 
-### 本地網頁: http://localhost:3000
+Open **http://localhost:3000**
 
+## Tech Stack
 
-### [(教學)Ubuntu 安裝 Docker + NVIDIA Container Toolkit](https://github.com/violetzu/knowledge/blob/01ecf7828174c0a082418e4410d5e8081abc7799/docker%20install.md)
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 16, React 19, Tailwind CSS v4 |
+| Backend | FastAPI, SQLAlchemy, MySQL 8.0 |
+| Detection | YOLOv8 (ball), YOLO26n-pose (player & court) |
+| VLM | Qwen3-VL via vLLM |
+| Video | FFmpeg pipe (decode/encode), OpenCV |
+| Deploy | Docker Compose, Cloudflare Tunnel |
+
+## Model Training
+
+All three detection models were custom-trained. Training scripts, dataset download scripts, and conversion tools are in `backend/models/`.
+
+### Ball Detection
+
+| Item | Detail |
+|---|---|
+| Base model | YOLOv26s |
+| Dataset | [TrackNet](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset) (44,747 frames, 1280×720, 30fps) — converted to YOLO format via `tracknet_to_yolo.py` (center point → 16px bbox) |
+| Training | 300 epochs, imgsz 1280, batch 48, rect, mixup 0.1 |
+| Result | **mAP50 0.956** |
+| Scripts | `tracknet_dataset.sh` (download), `tracknet_to_yolo.py` (convert), `tracknet_ball_train.sh` (train), `ball_val.sh` (validate) |
+
+### Court Keypoint Detection
+
+| Item | Detail |
+|---|---|
+| Base model | YOLOv26n-pose |
+| Dataset | [Roboflow Tennis Court](https://universe.roboflow.com/ds/zINRxAuTHq?key=r4cjK6OqYT) — 14 keypoints (4 corners + service lines + center line) |
+| Training | 100 epochs, imgsz 320, rect, mixup 0.1, augmentation (degrees 5, scale 0.3, shear 2, perspective 0.0001) |
+| Result | **mAP50 0.994** |
+| Scripts | `court_dataset.sh` (download), `court_train.sh` (train), `court_val.sh` (validate) |
+
+### Player Pose Estimation
+
+| Item | Detail |
+|---|---|
+| Model | YOLOv26n-pose (pretrained COCO 17-keypoint) |
+| Training | None — used as-is |
+| Scripts | `download.sh` |
+
+## Documentation
+
+- **[SPEC.md](SPEC.md)** — Full system specification in Chinese: architecture, database schema, backend/frontend details, analysis pipeline internals, JSON format, API reference
+
+## Links
+
+- [Google Drive — Models & Test Videos](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
+- [TrackNet Tennis Ball Dataset](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset)
+- [Roboflow Tennis Court Dataset](https://universe.roboflow.com/ds/zINRxAuTHq?key=r4cjK6OqYT)
+- [(Guide) Ubuntu Docker + NVIDIA Container Toolkit](https://github.com/violetzu/knowledge/blob/01ecf7828174c0a082418e4410d5e8081abc7799/docker%20install.md)
