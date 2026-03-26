@@ -5,3 +5,5 @@
 !*.gitignore
 !*_dataset.sh
 !*_train.sh
+!*_val.sh
+!*_to_yolo.py

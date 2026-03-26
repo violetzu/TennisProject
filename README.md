@@ -172,6 +172,4 @@ All three detection models were custom-trained. Training scripts, dataset downlo
 ## Links
 
 - [Google Drive — Models & Test Videos](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
-- [TrackNet Tennis Ball Dataset](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset)
-- [Roboflow Tennis Court Dataset](https://universe.roboflow.com/ds/zINRxAuTHq?key=r4cjK6OqYT)
 - [(Guide) Ubuntu Docker + NVIDIA Container Toolkit](https://github.com/violetzu/knowledge/blob/01ecf7828174c0a082418e4410d5e8081abc7799/docker%20install.md)
