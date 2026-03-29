@@ -181,6 +181,8 @@ async def analyze_combine_api(
             sess.update(status="completed", progress=100)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             sess.update(status="failed", error=str(e), progress=0)
 
     asyncio.create_task(runner())

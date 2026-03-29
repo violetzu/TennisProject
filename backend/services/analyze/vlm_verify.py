@@ -7,7 +7,9 @@ VLM 回合勝負判斷模組
 
 from __future__ import annotations
 
+import queue
 import re
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,11 +20,11 @@ import requests
 from config import VIDEO_DIR, VIDEO_URL_DOMAIN
 
 # ── 常數 ──────────────────────────────────────────────────────────────────────
-THUMB_STRIDE             = 5    # Phase 1：每 N 幀儲存一張縮圖（5 → 每 ~0.08s@60fps）
-THUMB_W                  = 320  # 縮圖寬度（px）
-THUMB_H                  = 180  # 縮圖高度（px）
-WINNER_LOOK_AHEAD_FRAMES = 240  # 最後一拍後最多看幾幀（~4s@60fps）
-MAX_FRAMES_PER_WINNER    = 8    # 每次 VLM 最多送幾張縮圖（winner 判斷）
+THUMB_STRIDE_SEC         = 0.17  # 每 N 秒儲存一張縮圖
+THUMB_W                  = 320   # 縮圖寬度（px）
+THUMB_H                  = 180   # 縮圖高度（px）
+WINNER_LOOK_AHEAD_SEC    = 4.0   # 最後一拍後最多看幾秒
+MAX_FRAMES_PER_WINNER    = 8     # 每次 VLM 最多送幾張縮圖（winner 判斷）
 VLM_TIMEOUT              = 120  # VLLM 呼叫 timeout（秒）
 
 _SYSTEM_PROMPT = (
@@ -41,6 +43,68 @@ def save_thumbnail(frame: np.ndarray, thumb_dir: Path, idx: int) -> None:
         small,
         [cv2.IMWRITE_JPEG_QUALITY, 70],
     )
+
+
+class ThumbnailWriter:
+    """非同步縮圖寫入器。
+
+    背景 thread 處理 JPEG encode + disk I/O，主迴圈不阻塞。
+
+    用法::
+
+        writer = ThumbnailWriter(thumb_dir)
+        for idx, frame in ...:
+            writer.maybe_save(frame, idx, court_draw_data, skel_data,
+                              ball_positions, max_trail_jump)
+        writer.close()  # 等待所有寫入完成
+    """
+
+    def __init__(self, thumb_dir: Path, fps: float = 30.0):
+        self.thumb_dir = thumb_dir
+        self.thumb_dir.mkdir(exist_ok=True)
+        self.stride = max(1, int(THUMB_STRIDE_SEC * fps))
+        self._fps = fps
+        self._queue: queue.Queue = queue.Queue(maxsize=64)
+        self._thread = threading.Thread(target=self._writer_loop, daemon=True)
+        self._thread.start()
+
+    def maybe_save(
+        self,
+        frame: np.ndarray,
+        idx: int,
+        court_draw_data,
+        skel_data,
+        ball_positions,
+        max_trail_jump: float,
+    ) -> None:
+        """每 stride 幀存一張縮圖。非阻塞（除非 queue 滿）。"""
+        if idx % self.stride != 0:
+            return
+        from .court import draw_court
+        from .player import draw_skeleton_from_data
+        from .ball import draw_ball_trail
+
+        thumb = frame.copy()
+        if court_draw_data is not None:
+            draw_court(thumb, court_draw_data[0],
+                       H=court_draw_data[1], kps=court_draw_data[2])
+        draw_skeleton_from_data(thumb, skel_data)
+        draw_ball_trail(thumb, idx, ball_positions, max_trail_jump, fps=self._fps)
+        small = cv2.resize(thumb, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
+        self._queue.put((small, self.thumb_dir / f"frame_{idx:06d}.jpg"))
+
+    def close(self) -> None:
+        """等待所有縮圖寫完。"""
+        self._queue.put(None)
+        self._thread.join()
+
+    def _writer_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            img, path = item
+            cv2.imwrite(str(path), img, [cv2.IMWRITE_JPEG_QUALITY, 70])
 
 
 def _thumb_to_url(thumb_path: Path) -> str:
@@ -129,10 +193,11 @@ def verify_rally_winner(
     VLM 看最後一拍之後的幾幀，判斷是否有人得分及得分方。
     Returns: 'top' | 'bottom' | 'unknown'
     """
+    look_ahead = max(1, int(WINNER_LOOK_AHEAD_SEC * fps))
     end_f = (
-        min(last_contact_f + WINNER_LOOK_AHEAD_FRAMES, next_rally_start_f - 1)
+        min(last_contact_f + look_ahead, next_rally_start_f - 1)
         if next_rally_start_f is not None
-        else last_contact_f + WINNER_LOOK_AHEAD_FRAMES
+        else last_contact_f + look_ahead
     )
     thumbs = select_rally_thumbs(thumb_dir, last_contact_f, end_f, MAX_FRAMES_PER_WINNER)
     if not thumbs:

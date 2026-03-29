@@ -83,7 +83,7 @@ def detect_pose(
         (top_pos, bot_pos, top_wrist, bot_wrist, skeleton_data)
         skeleton_data: [(keypoints, side), ...] side='top'|'bottom'
     """
-    results = model.predict(source=frame, imgsz=1280, conf=0.01, verbose=False)
+    results = model.predict(source=frame, imgsz=1280, conf=0.01, verbose=False, half=True)
     pose_r = results[0] if results else None
     top_pos, bot_pos, top_wrist, bot_wrist = detect_players(
         pose_r, img_w, img_h, court_corners, net_y)
@@ -148,6 +148,30 @@ def detect_players(
 
     return top, bot, top_w, bot_w
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 姿態偵測器（薄 wrapper）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PoseDetector:
+    """封裝姿態偵測模型。"""
+
+    def __init__(self, model):
+        self.model = model
+
+    def detect(
+        self,
+        frame: np.ndarray,
+        img_w: int,
+        img_h: int,
+        court_corners: Optional[np.ndarray] = None,
+        net_y: Optional[float] = None,
+    ) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]],
+               Optional[Tuple[float, float]], Optional[Tuple[float, float]],
+               List[Tuple[list, str]]]:
+        """Pose 偵測 + 球員歸屬，回傳與 detect_pose() 相同格式。"""
+        return detect_pose(self.model, frame, img_w, img_h, court_corners, net_y)
 
 
 def draw_skeleton_from_data(frame: np.ndarray, skel_data: List[Tuple[list, str]]) -> None:

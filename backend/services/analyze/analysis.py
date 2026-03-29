@@ -46,12 +46,15 @@ MAX_BALL_SPEED_KMH = 280.0
 
 # ── 事件偵測參數 ───────────────────────────────────────────────────────────────
 WRIST_HIT_RADIUS = 0.08        # 球距手腕 < 畫面高度 8% → 擊球候選
-WRIST_SEARCH_WINDOW = 5        # 局部最小值搜尋窗口（前後各 N 幀）
-COOLDOWN_FRAMES = 8            # 擊球冷卻（不同球員交替）
-SAME_PLAYER_COOLDOWN = 20      # 同一球員連擊冷卻（0.33s@60fps；防止同次揮拍重複觸發）
-BOUNCE_COOLDOWN = 4            # bounce 後接 hit 允許更短冷卻
+WRIST_SEARCH_SEC = 0.17        # 局部最小值搜尋窗口（前後各 N 秒）
+COOLDOWN_SEC = 0.27            # 擊球冷卻（不同球員交替）
+SAME_PLAYER_COOLDOWN_SEC = 0.33  # 同一球員連擊冷卻（防止同次揮拍重複觸發）
+BOUNCE_COOLDOWN_SEC = 0.13     # bounce 後接 hit 允許更短冷卻
 SWING_MIN_WRIST_RATIO = 0.05   # 手腕位移 / 球員縮放閾值（乘以球員 y 位置比例）
-SWING_CHECK_WINDOW = 4         # 揮拍動作檢查窗口（前後各 N 幀）
+SWING_CHECK_SEC = 0.13         # 揮拍動作檢查窗口（前後各 N 秒）
+FORWARD_COURT_SEC = 0.67       # 擊球後前看秒數，確認球回到場地
+SERVE_TOSS_LOOKBACK_SEC = 0.7  # 發球拋球偵測回看秒數
+SERVE_CROSS_SEC = 3.0          # 擊球後球進入對方發球區的最大等待秒數
 
 # ── 回合切割 ──────────────────────────────────────────────────────────────────
 RALLY_GAP_SEC = 3.5            # 回合間隔閾值（秒）；2.5 太短，底線長回合中球追蹤中斷可能超過 2s
@@ -127,13 +130,14 @@ def detect_events(
     img_h: int,
     fps: float,
     scene_cut_frames: List[int],
+    frame_offset: int = 0,
 ) -> Tuple[List[int], List[int], Dict[int, float]]:
     """
     第一性原理事件偵測：球靠近手腕 = 擊球，軌跡反轉且遠離所有人 = 觸地。
 
     擊球偵測：
       1. 逐幀算球到每個球員手腕的距離
-      2. 找距離的局部最小值（前後 WRIST_SEARCH_WINDOW 幀內最小）
+      2. 找距離的局部最小值（前後 WRIST_SEARCH_SEC 秒內最小）
       3. 最小值 < WRIST_HIT_RADIUS（畫面高度 8%）→ 確認為擊球
 
     觸地偵測：
@@ -145,8 +149,16 @@ def detect_events(
     pos = ball_positions  # 已在呼叫端插值
     n = len(pos)
     hit_radius = img_h * WRIST_HIT_RADIUS
-    W = WRIST_SEARCH_WINDOW
     cut_set = set(scene_cut_frames)
+
+    # 以 fps 動態換算幀數
+    W = max(1, int(WRIST_SEARCH_SEC * fps))
+    cd_frames = max(1, int(COOLDOWN_SEC * fps))
+    cd_same = max(1, int(SAME_PLAYER_COOLDOWN_SEC * fps))
+    cd_bounce = max(1, int(BOUNCE_COOLDOWN_SEC * fps))
+    SW = max(1, int(SWING_CHECK_SEC * fps))
+    fwd_court = max(1, int(FORWARD_COURT_SEC * fps))
+    serve_lookback = max(1, int(SERVE_TOSS_LOOKBACK_SEC * fps))
 
     # ── 逐幀球到最近手腕的距離 ──────────────────────────────────────────
     ball_wrist_dist: List[Optional[float]] = [None] * n
@@ -193,8 +205,6 @@ def detect_events(
     # 延遲確認：球在手腕範圍內時持續更新候選，離開後才正式記錄
     _pending: Optional[Tuple[int, float, str]] = None  # (frame, dist, player)
 
-    SW = SWING_CHECK_WINDOW
-
     def _wrist_move(frame_idx: int, player: str) -> float:
         """計算該球員手腕在 ±SW 幀內的最大位移（像素）。"""
         wl = wrist_top if player == "top" else wrist_bottom
@@ -220,6 +230,74 @@ def detect_events(
         scale = pp[1] / img_h if pp is not None else 0.5
         return img_h * SWING_MIN_WRIST_RATIO * scale
 
+    def _is_serve_toss(fi: int, player: str) -> bool:
+        """偵測發球拋球模式：球在頭頂 + vy 反轉 + 球在同側。"""
+        bp = pos[fi] if fi < n else None
+        if bp is None:
+            return False
+        pl = player_top if player == "top" else player_bottom
+        pp_pos = pl[fi] if fi < len(pl) else None
+        if pp_pos is None:
+            return False
+        # A: 球在球員頭頂上方，垂直距離合理，且水平接近
+        vert_dist = pp_pos[1] - bp[1]
+        if vert_dist < img_h * 0.02 or vert_dist > img_h * 0.20:
+            return False
+        if abs(bp[0] - pp_pos[0]) > img_w * 0.25:
+            return False
+        # B: 擊球前 vy 反轉（拋球：先上後下）
+        start_look = max(0, fi - serve_lookback)
+        up_count = 0
+        down_after_up = 0
+        found_up = False
+        for j in range(start_look, fi):
+            v = vy_s[j] if j < len(vy_s) else None
+            if v is None:
+                continue
+            if v < -0.5:
+                up_count += 1
+                found_up = True
+            elif found_up and v > 0.5:
+                down_after_up += 1
+        min_phase = max(2, int(0.1 * fps))
+        if up_count < min_phase or down_after_up < min_phase:
+            return False
+        # C: 球在發球方半場（非從對面飛來）
+        half_y = img_h * 0.5
+        same_side = 0
+        total = 0
+        for j in range(start_look, fi):
+            p = pos[j] if j < n else None
+            if p is None:
+                continue
+            total += 1
+            if player == "top" and p[1] < half_y:
+                same_side += 1
+            elif player == "bottom" and p[1] > half_y:
+                same_side += 1
+        if total < 3 or same_side / total < 0.8:
+            return False
+        return True
+
+    def _in_opp_court(fi: int, player: str, window: int) -> bool:
+        """fi 後 window 幀內球是否在對方場地形成軌跡（至少 min_pts 個連續偵測點）。
+        單一誤判點不計算，需要連續命中才確認。"""
+        min_pts = max(2, int(0.1 * fps))
+        count = 0
+        for j in range(fi, min(n, fi + window)):
+            p = pos[j]
+            if p is None:
+                continue  # 跳過缺幀，不重置連續計數
+            in_opp = (player == "top" and p[1] > img_h * 0.25) or \
+                     (player == "bottom" and p[1] < img_h * 0.75)
+            if in_opp:
+                count += 1
+                if count >= min_pts:
+                    return True
+            else:
+                count = 0  # 球離開對方場地，重置連續計數
+        return False
+
     def _commit_pending() -> None:
         nonlocal last_event, last_event_type, last_event_player, _pending
         if _pending is None:
@@ -230,8 +308,92 @@ def detect_events(
         wm = _wrist_move(pi, pp)
         thr = _swing_threshold(pi, pp)
         if wm < thr:
-            print(f"  [hit-rejected] f={pi} t={pi/fps:.2f}s player={pp} "
+            print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
                   f"wrist_move={wm:.0f} < {thr:.0f}")
+            return
+        # 發球拋球偵測：豁免前向軌跡檢查
+        serve_cross = max(1, int(SERVE_CROSS_SEC * fps))
+        if _is_serve_toss(pi, pp):
+            pre_trail = [pos[j] for j in range(max(0, pi - serve_lookback), pi)
+                         if pos[j] is not None]
+            pre_disp = sum(
+                math.hypot(pre_trail[k][0] - pre_trail[k - 1][0],
+                           pre_trail[k][1] - pre_trail[k - 1][1])
+                for k in range(1, len(pre_trail))) if len(pre_trail) >= 2 else 0
+            if pre_disp < img_h * 0.05:
+                print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                      f"serve toss but no displacement (pre_disp={pre_disp:.0f})")
+                return
+            # 驗證球確實進入對方發球區（過發球線）
+            if not _in_opp_court(pi, pp, serve_cross):
+                print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                      f"serve toss but ball never reached opponent court")
+                return
+            conf = min(0.90, 0.5 + 0.3 * (1.0 - pd / hit_radius))
+            contacts.append(pi)
+            confidence[pi] = conf
+            last_event_type = "contact"
+            last_event = pi
+            last_event_player = pp
+            print(f"  [hit-serve] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                  f"d_wrist={pd:.0f} wrist_move={wm:.0f} pre_disp={pre_disp:.0f}")
+            return
+        # 前向軌跡檢查：擊球後球應有移動軌跡且進入場地
+        # 靜態假偵測（場地標記）→ 無位移 → 拒絕
+        # 球僮回收球 → 有位移但不在場內 → 拒絕
+        # 快球追丟 → 無足夠偵測點 → 無法驗證，拒絕
+        fwd_skip = max(1, int(0.1 * fps))
+        fwd_trail = []
+        for j in range(pi + fwd_skip, min(n, pi + fwd_court)):
+            fp = pos[j]
+            if fp is not None:
+                fwd_trail.append(fp)
+        # 條件 1：需有足夠偵測點形成軌跡
+        fwd_min_pts = max(2, int(0.1 * fps))
+        if len(fwd_trail) < fwd_min_pts:
+            # 備援：快速擊球可能追丟，但球確實進入對方場地
+            if _in_opp_court(pi, pp, serve_cross):
+                conf = min(0.85, 0.5 + 0.3 * (1.0 - pd / hit_radius))
+                contacts.append(pi)
+                confidence[pi] = conf
+                last_event_type = "contact"
+                last_event = pi
+                last_event_player = pp
+                print(f"  [hit-fast] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                      f"d_wrist={pd:.0f} (no fwd trail, ball crossed court)")
+                return
+            print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                  f"no trajectory after hit ({len(fwd_trail)} pts)")
+            return
+        # 條件 2：軌跡需有實際位移（過濾靜態假偵測如場地標記）
+        total_disp = sum(
+            math.hypot(fwd_trail[k][0] - fwd_trail[k - 1][0],
+                       fwd_trail[k][1] - fwd_trail[k - 1][1])
+            for k in range(1, len(fwd_trail)))
+        min_disp = img_h * 0.05
+        if total_disp < min_disp:
+            print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                  f"static detection after hit (disp={total_disp:.0f} < {min_disp:.0f})")
+            return
+        # 條件 3：軌跡需進入場地區域（過濾球僮回收球）
+        in_court = any(
+            (pp == "bottom" and fp[1] < img_h * 0.75) or
+            (pp == "top" and fp[1] > img_h * 0.25)
+            for fp in fwd_trail)
+        if not in_court:
+            # 備援：發球殘留軌跡在頂部，但球確實進入對方場地（快速發球）
+            if _in_opp_court(pi, pp, serve_cross):
+                conf = min(0.85, 0.5 + 0.3 * (1.0 - pd / hit_radius))
+                contacts.append(pi)
+                confidence[pi] = conf
+                last_event_type = "contact"
+                last_event = pi
+                last_event_player = pp
+                print(f"  [hit-fast] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                      f"d_wrist={pd:.0f} (fwd not in court, ball crossed court)")
+                return
+            print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                  f"trajectory not in court (out-of-play)")
             return
         conf = min(0.95, 0.5 + 0.5 * (1.0 - pd / hit_radius))
         contacts.append(pi)
@@ -239,7 +401,7 @@ def detect_events(
         last_event_type = "contact"
         last_event = pi
         last_event_player = pp
-        print(f"  [hit] f={pi} t={pi/fps:.2f}s player={pp} "
+        print(f"  [hit] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
               f"d_wrist={pd:.0f} wrist_move={wm:.0f} thr={thr:.0f}")
 
     for i in range(W, n - W):
@@ -273,11 +435,11 @@ def detect_events(
 
         # 冷卻：同一球員用較長冷卻，防止同次揮拍重複觸發
         if last_event_type == "bounce":
-            eff_cd = BOUNCE_COOLDOWN
+            eff_cd = cd_bounce
         elif player_i == last_event_player:
-            eff_cd = SAME_PLAYER_COOLDOWN
+            eff_cd = cd_same
         else:
-            eff_cd = COOLDOWN_FRAMES
+            eff_cd = cd_frames
         if i - last_event < eff_cd:
             continue
 
@@ -312,10 +474,10 @@ def detect_events(
         if not (vy_prev > 0.5 and vy_curr < -0.5):
             continue
         # 不能太靠近已偵測的擊球
-        if any(abs(i - c) < COOLDOWN_FRAMES for c in contacts):
+        if any(abs(i - c) < cd_frames for c in contacts):
             continue
         # 不能太靠近其他 bounce
-        if any(abs(i - b) < BOUNCE_COOLDOWN for b in bounces):
+        if any(abs(i - b) < cd_bounce for b in bounces):
             continue
         # 遠離所有球員
         d = ball_wrist_dist[i]
@@ -324,46 +486,11 @@ def detect_events(
 
         bounces.append(i)
         confidence[i] = 0.85
-        print(f"  [bounce] f={i} t={i/fps:.2f}s "
+        print(f"  [bounce] f={i + frame_offset} t={(i + frame_offset)/fps:.2f}s "
               f"d_nearest={f'{d:.0f}' if d is not None else 'inf'}")
 
     print(f"[detect_events] {len(contacts)} hits, {len(bounces)} bounces")
     return contacts, bounces, confidence
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 回合切割
-# ─────────────────────────────────────────────────────────────────────────────
-
-def segment_rallies(
-    contacts: List[int],
-    fps: float,
-    scene_cut_frames: List[int],
-) -> List[List[int]]:
-    """
-    依時間間隔（> RALLY_GAP_SEC）或切鏡邊界切割回合。
-
-    Returns:
-        回合列表，每個回合為 contact 幀索引列表。
-    """
-    if not contacts:
-        return []
-    gap_frames = int(RALLY_GAP_SEC * fps)
-    cut_set = set(scene_cut_frames)
-
-    rallies: List[List[int]] = []
-    current = [contacts[0]]
-
-    for c in contacts[1:]:
-        cut_between = any(current[-1] < sc <= c for sc in cut_set)
-        if (c - current[-1]) > gap_frames or cut_between:
-            rallies.append(current)
-            current = []
-        current.append(c)
-
-    if current:
-        rallies.append(current)
-    return rallies
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -550,75 +677,3 @@ def find_winner_landing(
     return None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 分析主入口
-# ─────────────────────────────────────────────────────────────────────────────
-
-def run_analysis(
-    *,
-    all_ball_positions: List[Optional[Tuple[float, float]]],
-    all_wrist_top: List[Optional[Tuple[float, float]]],
-    all_wrist_bottom: List[Optional[Tuple[float, float]]],
-    all_player_top: List[Optional[Tuple[float, float]]],
-    all_player_bottom: List[Optional[Tuple[float, float]]],
-    width: int,
-    height: int,
-    fps: float,
-    scene_cut_frames: List[int],
-    last_valid_H,
-    thumb_dir,
-    vllm_cfg,
-    progress_cb=None,
-    precomputed_events: Optional[Tuple[List[int], List[int], Dict[int, float]]] = None,
-) -> Dict:
-    """事件偵測 + 球速 + 回合切割 + VLM 勝負，統一回傳分析結果。
-
-    precomputed_events: 若提供 (contacts, bounces, confidence)，跳過 detect_events。
-    """
-    import shutil
-
-    if precomputed_events is not None:
-        contacts_f, bounces_f, event_confidence = precomputed_events
-    else:
-        contacts_f, bounces_f, event_confidence = detect_events(
-            all_ball_positions, all_wrist_top, all_wrist_bottom,
-            all_player_top, all_player_bottom,
-            width, height, fps, scene_cut_frames,
-        )
-
-    if last_valid_H is not None:
-        raw_speeds = compute_frame_speeds_world(all_ball_positions, fps, last_valid_H)
-    else:
-        raw_speeds = [None] * len(all_ball_positions)
-    smooth_speeds = smooth(raw_speeds, 5)
-
-    vlm_shot_types: Dict[int, str] = {f: "swing" for f in contacts_f}
-    rally_groups = segment_rallies(contacts_f, fps, scene_cut_frames)
-
-    if progress_cb:
-        progress_cb(97, 100)
-
-    try:
-        vlm_winner_results = determine_winners(
-            rally_groups, thumb_dir, fps, vllm_cfg, progress_cb)
-    except Exception as exc:
-        print(f"[VLM] winner判斷失敗: {exc}")
-        vlm_winner_results = {}
-    finally:
-        shutil.rmtree(thumb_dir, ignore_errors=True)
-
-    print(f"[analysis] {len(contacts_f)} contacts, "
-          f"{len(bounces_f)} bounces, {len(rally_groups)} rallies")
-
-    if progress_cb:
-        progress_cb(99, 100)
-
-    return {
-        "contacts_f": contacts_f,
-        "bounces_f": bounces_f,
-        "event_confidence": event_confidence,
-        "smooth_speeds": smooth_speeds,
-        "vlm_shot_types": vlm_shot_types,
-        "rally_groups": rally_groups,
-        "vlm_winner_results": vlm_winner_results,
-    }

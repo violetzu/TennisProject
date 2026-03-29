@@ -7,7 +7,7 @@ YOLO 球場偵測 (YOLO Court Detection)
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -149,7 +149,7 @@ def detect_court_yolo(
         img_corners 順序：[TL, TR, BL, BR]（對應 WORLD_CORNERS）
         kps：全 14 個關鍵點影像座標
     """
-    results = model.predict(source=frame, imgsz=320, conf=COURT_CONF_TH, verbose=False)
+    results = model.predict(source=frame, imgsz=320, conf=COURT_CONF_TH, verbose=False, half=True)
     if not results:
         return None
     r = results[0]
@@ -216,17 +216,17 @@ def draw_court(frame: np.ndarray, img_corners: np.ndarray,
             try:
                 H_inv = _inv_H(H)
                 world_extra = np.array([[
-                    [_SINGLES_L_X, _SERVICE_Y_FAR],  # 遠端發球線左
-                    [_SINGLES_R_X, _SERVICE_Y_FAR],  # 遠端發球線右
-                    [_CENTER_X,    _SERVICE_Y_FAR],  # 中線上端（遠）
+                    [_SINGLES_L_X, _SERVICE_Y_FAR],   # 遠端發球線左
+                    [_SINGLES_R_X, _SERVICE_Y_FAR],   # 遠端發球線右
+                    [_CENTER_X,    _SERVICE_Y_FAR],   # 中線上端（遠）
+                    [_CENTER_X,    _SERVICE_Y_NEAR],  # 中線下端（近）
                 ]], dtype=np.float32)
                 pts = cv2.perspectiveTransform(world_extra, H_inv)[0]
-                svc_far_l, svc_far_r, ctr_top = pts[0], pts[1], pts[2]
+                svc_far_l, svc_far_r, ctr_top, ctr_bot = pts[0], pts[1], pts[2], pts[3]
                 # 遠端發球線
                 cv2.line(frame, _pt(svc_far_l), _pt(svc_far_r), color, thickness)
-                # 中線：上端補算，下端 = kp[12]（近端發球線中心點）
-                cv2.line(frame, _pt(ctr_top), _pt(kps[_KP_SERVICE_NEAR_C]),
-                         color, thickness)
+                # 中線：H 補算兩端，不依賴 kps[12]
+                cv2.line(frame, _pt(ctr_top), _pt(ctr_bot), color, thickness)
             except Exception:
                 pass
         return
@@ -251,3 +251,61 @@ def draw_court(frame: np.ndarray, img_corners: np.ndarray,
     tl, tr, bl, br = pts[0], pts[1], pts[2], pts[3]
     for a, b in [(tl, tr), (bl, br), (tl, bl), (tr, br)]:
         cv2.line(frame, tuple(a), tuple(b), color, thickness)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 場地偵測器（有狀態 wrapper）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CourtDetector:
+    """封裝場地偵測狀態 + 場景切換追蹤。
+
+    使用方式::
+
+        court = CourtDetector(model)
+        for idx, frame in enumerate(frames):
+            court.detect(frame, idx)
+            if court.is_valid:
+                ...  # 使用 court.H, court.corners, court.net_y
+    """
+
+    def __init__(self, model):
+        self.model = model
+        self.H: Optional[np.ndarray] = None
+        self.corners: Optional[np.ndarray] = None
+        self.kps: Optional[np.ndarray] = None
+        self.net_y: Optional[float] = None
+        self.last_valid_H: Optional[np.ndarray] = None
+        self.scene_cuts: List[int] = []
+        self.scene_cut_set: set = set()
+
+    def detect(self, frame: np.ndarray, frame_idx: int) -> bool:
+        """偵測場地，更新內部狀態。
+
+        失敗且之前有效 → 記錄場景切換。
+        Returns: 是否偵測成功。
+        """
+        result = detect_court_yolo(frame, self.model)
+        if result is not None:
+            self.H, self.corners, self.kps = result
+            self.net_y = compute_net_y(self.H)
+            self.last_valid_H = self.H
+            return True
+        if self.H is not None:
+            self.scene_cuts.append(frame_idx)
+            self.scene_cut_set.add(frame_idx)
+        self.H = None
+        self.corners = None
+        self.kps = None
+        self.net_y = None
+        return False
+
+    @property
+    def is_valid(self) -> bool:
+        return self.H is not None
+
+    def get_draw_data(self) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        """取得繪製用資料（corners, H, kps 的 copy）。"""
+        if self.corners is None or self.H is None or self.kps is None:
+            return None
+        return (self.corners.copy(), self.H.copy(), self.kps.copy())

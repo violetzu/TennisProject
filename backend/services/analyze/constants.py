@@ -5,4 +5,4 @@ COLOR_TOP = (0, 255, 0)        # 上方球員：綠色
 COLOR_BOTTOM = (0, 255, 255)   # 下方球員：黃色
 
 # 球軌跡漸變
-GRADIENT_HALF = 5              # 擊球漸變半幅（幀數）
+GRADIENT_HALF_SEC = 0.17       # 擊球漸變半幅（秒）

@@ -17,9 +17,12 @@ function RallyRow({ r, onShotClick }: { r: any; onShotClick?: (s: any) => void }
         <span className="text-gray-400 dark:text-gray-500 text-xs">{open ? "▼" : "▶"}</span>
         <strong>回合 {r.id}</strong>
         <span className="ml-1 text-gray-500 dark:text-gray-400">
-          {r.shot_count} 擊 | {r.start_time_sec?.toFixed(2)}s – {r.end_time_sec?.toFixed(2)}s
+          {r.shot_count} 擊 | {r.start_time_sec?.toFixed(2)}s – {r.end_time_sec?.toFixed(2)}s 
         </span>
-        <span className="text-gray-500 dark:text-gray-400">發球：{r.server === "top" ? "▲上方" : "▼下方"}</span>
+        <span className="text-gray-500 dark:text-gray-400">| 發球：{r.server === "top" ? "▲上方" : "▼下方"} </span>
+        {r.outcome?.winner_player && r.outcome.winner_player !== "unknown" && (
+          <span className="text-gray-500 dark:text-gray-400">| 得分：{r.outcome.winner_player === "top" ? "▲上方" : "▼下方"} </span>
+        )}
       </div>
 
       {open && shots.length > 0 && (
