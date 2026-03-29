@@ -262,12 +262,7 @@ export default function VideoPanel({
 
           <video
             ref={videoRef} controls
-            className={`w-full h-full object-contain cursor-pointer ${hasAnyVideo ? "block" : "hidden"}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              const v = e.currentTarget;
-              v.paused ? void v.play() : v.pause();
-            }}
+            className={`w-full h-full object-contain ${hasAnyVideo ? "block" : "hidden"}`}
           />
 
           <canvas className="hidden" />
