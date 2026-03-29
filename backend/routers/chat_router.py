@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import json
-import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -11,13 +10,12 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from auth import get_current_user_optional
-from config import BASE_DIR, VIDEO_DIR, VIDEO_URL_DOMAIN, VLLM
+from config import BASE_DIR, DATA_DIR, VIDEO_URL_DOMAIN, VLLM
 from database import SessionLocal, get_db
-from sql_models import AnalysisRecord, User
+from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import get_session_or_404
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -32,7 +30,7 @@ class ChatRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _to_video_url(raw_video_path: str) -> str:
-    rel = Path(raw_video_path).resolve().relative_to(VIDEO_DIR.resolve()).as_posix()
+    rel = Path(raw_video_path).resolve().relative_to(DATA_DIR.resolve()).as_posix()
     return f"{VIDEO_URL_DOMAIN}/videos/{rel}"
 
 
@@ -158,29 +156,19 @@ def _persist_message_pair(
 ) -> None:
     task_db = SessionLocal()
     try:
-        now = datetime.utcnow()
-        task_db.execute(
-            text("""
-                INSERT INTO analysis_messages (analysis_record_id, role, content, created_at)
-                VALUES (:rid, 'user', :content, :ts)
-            """),
-            {"rid": record_id, "content": user_text, "ts": now},
-        )
-        task_db.execute(
-            text("""
-                INSERT INTO analysis_messages (analysis_record_id, role, content, created_at)
-                VALUES (:rid, 'assistant', :content, :ts)
-            """),
-            {"rid": record_id, "content": assistant_text, "ts": now},
-        )
-        task_db.execute(
-            text("""
-                UPDATE analysis_records
-                SET session_id = :sid, updated_at = NOW()
-                WHERE id = :rid
-            """),
-            {"sid": session_id, "rid": record_id},
-        )
+        now = datetime.now(timezone.utc)
+        task_db.add(AnalysisMessage(
+            analysis_record_id=record_id, role="user",
+            content=user_text, created_at=now,
+        ))
+        task_db.add(AnalysisMessage(
+            analysis_record_id=record_id, role="assistant",
+            content=assistant_text, created_at=now,
+        ))
+        rec = task_db.get(AnalysisRecord, record_id)
+        if rec:
+            rec.session_id = session_id
+            rec.updated_at = now
         task_db.commit()
     finally:
         task_db.close()
@@ -200,7 +188,8 @@ async def chat(
     if not question:
         raise HTTPException(400, "question 不可為空")
 
-    record_id = sess.get("analysis_record_id") if isinstance(sess.get("analysis_record_id"), int) else None
+    _rid = sess.get("analysis_record_id")
+    record_id = _rid if isinstance(_rid, int) else None
 
     duration: Optional[float] = None
     analysis_context: Optional[str] = None
@@ -209,8 +198,10 @@ async def chat(
         if rec:
             if rec.duration:
                 duration = float(rec.duration)
-            if rec.analysis_json_path:
-                analysis_context = _build_analysis_context(rec.analysis_json_path)
+            if rec.analysis_done:
+                json_path = Path(rec.raw_video_path).parent / "analysis.json"
+                if json_path.exists():
+                    analysis_context = _build_analysis_context(str(json_path))
 
     messages = _build_messages(sess, question, duration, analysis_context)
 
@@ -246,47 +237,24 @@ async def chat(
                 yield error_text
                 return
 
-            # 模型固定輸出 <think>...</think> 思考區塊，之後才是正式回答
-            thinking = True        # True=仍在思考區, False=正式輸出中
-            output_started = False # 第一個非空白 token 出現前不 yield
-            buf = ""
-            _last_ka = time.monotonic()   # 上次 keep-alive 時間
+            # vLLM --reasoning-parser qwen3：推理區塊已在伺服器端分離，
+            # delta.content 只含正式回答 token，不再有 <think> 標記。
+            output_started = False
 
             for raw in _iter_vllm_sse_raw(resp):
-                # thinking 階段每 30s yield 零寬空格防止 Cloudflare 超時
-                if thinking and (time.monotonic() - _last_ka) > 30:
-                    yield "\u200b"
-                    _last_ka = time.monotonic()
-                if not thinking:
-                    clean = raw.translate(str.maketrans("", "", REMOVE_CHARS))
-                    if not output_started:
-                        clean = clean.lstrip("\n")
-                    if clean:
-                        output_started = True
-                        output_chunks.append(clean)
-                        yield clean
-                    continue
-
-                buf += raw
-                if "</think>" in buf:
-                    idx = buf.index("</think>") + len("</think>")
-                    print(f"[think]\n{buf[:idx]}\n[/think]")
-                    thinking = False
-                    rest = buf[idx:].lstrip("\n")
-                    buf = ""
-                    if rest:
-                        clean = rest.translate(str.maketrans("", "", REMOVE_CHARS))
-                        if clean:
-                            output_started = True
-                            output_chunks.append(clean)
-                            yield clean
+                clean = raw.translate(str.maketrans("", "", REMOVE_CHARS))
+                if not output_started:
+                    clean = clean.lstrip("\n")
+                if clean:
+                    output_started = True
+                    output_chunks.append(clean)
+                    yield clean
 
         except Exception as e:
             error_text = f"[Error: {e}]"
             yield error_text
 
         finally:
-            print(resp)
             full_answer = "".join(output_chunks).strip() or (error_text or "(no response)")
             history = sess.setdefault("history", [])
             history.append({"user": question, "assistant": full_answer})

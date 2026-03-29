@@ -4,22 +4,18 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 
-from config import VIDEO_DIR
+from config import DATA_DIR
 from sql_models import User
 
 
 # ── Path safety ───────────────────────────────────────────────────────────────
-def safe_under_video_dir(p: Path) -> bool:
-    try:
-        p.resolve().relative_to(VIDEO_DIR.resolve())
-        return True
-    except Exception:
-        return False
+def safe_under_data_dir(p: Path) -> bool:
+    return p.resolve().is_relative_to(DATA_DIR.resolve())
 
 
-def assert_under_video_dir(p: Path) -> None:
-    """確保路徑在 VIDEO_DIR 底下，防止 path traversal。"""
-    if not safe_under_video_dir(p):
+def assert_under_data_dir(p: Path) -> None:
+    """確保路徑在 DATA_DIR 底下，防止 path traversal。"""
+    if not safe_under_data_dir(p):
         raise HTTPException(400, "影片路徑非法")
 
 

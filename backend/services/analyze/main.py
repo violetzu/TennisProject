@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import json
 import time
+import os
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 from .ball import BallTracker, WINDOW_SEC
 from .court import CourtDetector
+from ._log import set_log_file, clear_log_file
 from .player import PoseDetector
 from .buffer import FrameBuffer, FrameSlot, PositionStore
 from .video_io import VideoPipe
@@ -62,10 +64,12 @@ def analyze_combine(
         raise FileNotFoundError(f"影片不存在: {video_path}")
 
     # ── 輸出路徑 ──────────────────────────────────────────────────────────────
-    Path(data_dir).mkdir(parents=True, exist_ok=True)
-    out_video = vpath.parent / f"{vpath.stem}_analyzed_{job_id}.mp4"
-    out_json = Path(data_dir) / f"analysis_{job_id}.json"
-    thumb_dir = vpath.parent / f"{job_id}_thumbs"
+    data_path = Path(data_dir)
+    data_path.mkdir(parents=True, exist_ok=True)
+    out_video = data_path / "analysis.mp4"
+    out_json  = data_path / "analysis.json"
+    log_path  = data_path / "analysis.log"
+    thumb_dir = data_path / "thumbs"
     thumb_dir.mkdir(exist_ok=True)
 
     # ── 元件初始化 ────────────────────────────────────────────────────────────
@@ -78,87 +82,101 @@ def analyze_combine(
     idx = 0
     t0_total = time.perf_counter()
 
-    with VideoPipe(vpath, out_video, width, height, fps) as pipe:
-        buf = FrameBuffer(
-            max(1, int(WINDOW_SEC * fps)), fps, width, height, pipe,
-            ball, positions, court, thumb_dir, VLLM,
-        )
+    # ── Log tee（wraps 所有 print 輸出到 analysis.log）────────────────────────
+    with open(log_path, "w", encoding="utf-8", buffering=1) as _log_file:
+        set_log_file(_log_file)
+        try:
+            with VideoPipe(vpath, out_video, width, height, fps) as pipe:
+                buf = FrameBuffer(
+                    max(1, int(WINDOW_SEC * fps)), fps, width, height, pipe,
+                    ball, positions, court, thumb_dir, VLLM,
+                )
 
-        # ── 主迴圈 ────────────────────────────────────────────────────────────
-        for idx, frame in enumerate(pipe.frames()):
-            # 場地偵測
-            court.detect(frame, idx)
+                # ── 主迴圈 ────────────────────────────────────────────────────
+                for idx, frame in enumerate(pipe.frames()):
+                    # 場地偵測
+                    court.detect(frame, idx)
 
-            if not court.is_valid:
-                if idx in court.scene_cut_set:
-                    ball.reset()
-                ball.append_none()
-                positions.append_none()
-                buf.push(FrameSlot(frame, False, [], None))
-                if progress_cb and total_frames:
-                    progress_cb(min(int(idx * 95 / total_frames), 94), 100)
-                continue
+                    if not court.is_valid:
+                        if idx in court.scene_cut_set:
+                            ball.reset()
+                        ball.append_none()
+                        positions.append_none()
+                        buf.push(FrameSlot(frame, False, [], None))
+                        if progress_cb and total_frames:
+                            progress_cb(min(int(idx * 95 / total_frames), 94), 100)
+                        continue
 
-            # Pose + Ball 推論
-            top, bot, tw, bw, skel = pose.detect(
-                frame, width, height, court.corners, court.net_y,
-            )
-            box = ball.detect(ball_model, frame, width, height, idx)
+                    # Pose + Ball 推論
+                    top, bot, tw, bw, skel = pose.detect(
+                        frame, width, height, court.corners, court.net_y,
+                    )
+                    box = ball.detect(ball_model, frame, width, height, idx)
 
-            positions.append(top, bot, tw, bw)
-            ball.append_position(box)
+                    positions.append(top, bot, tw, bw)
+                    ball.append_position(box)
 
-            # 縮圖（非同步寫入）
-            thumbs.maybe_save(
-                frame, idx, court.get_draw_data(), skel,
-                ball.all_positions, ball.max_trail_jump,
-            )
+                    # 縮圖（非同步寫入）
+                    thumbs.maybe_save(
+                        frame, idx, court.get_draw_data(), skel,
+                        ball.all_positions, ball.max_trail_jump,
+                    )
 
-            # 推入 buffer（滿 WINDOW 時自動 finalize + route）
-            buf.push(FrameSlot(frame, True, skel, court.get_draw_data()))
+                    # 推入 buffer（滿 WINDOW 時自動 finalize + route）
+                    buf.push(FrameSlot(frame, True, skel, court.get_draw_data()))
 
-            if progress_cb and total_frames:
-                progress_cb(min(int(idx * 95 / total_frames), 94), 100)
+                    if progress_cb and total_frames:
+                        progress_cb(min(int(idx * 95 / total_frames), 94), 100)
 
-        # ── 收尾 ──────────────────────────────────────────────────────────────
-        if progress_cb:
-            progress_cb(95, 100)
+                # ── 收尾 ──────────────────────────────────────────────────────
+                if progress_cb:
+                    progress_cb(95, 100)
 
-        buf.flush_remaining()
-        thumbs.close()
+                buf.flush_remaining()
+                thumbs.close()
 
-        if progress_cb:
-            progress_cb(97, 100)
+                if progress_cb:
+                    progress_cb(97, 100)
 
-        buf.wait_vlm()
+                buf.wait_vlm()
 
-    # ── JSON 輸出 ─────────────────────────────────────────────────────────────
-    total_frames_actual = idx + 1
-    duration = total_frames_actual / fps if fps > 0 else 0.0
+            # ── JSON 輸出 ─────────────────────────────────────────────────────
+            total_frames_actual = idx + 1
+            duration = total_frames_actual / fps if fps > 0 else 0.0
 
-    result = {
-        "metadata": {
-            "fps": round(fps, 3),
-            "width": width,
-            "height": height,
-            "total_frames": total_frames_actual,
-            "duration_sec": round(duration, 2),
-            "court_detected": court.last_valid_H is not None,
-            "scene_cuts": court.scene_cuts,
-        },
-        **buf.get_summary(),
-        "rallies": buf.rally_results,
-    }
+            result = {
+                "metadata": {
+                    "fps": round(fps, 3),
+                    "width": width,
+                    "height": height,
+                    "total_frames": total_frames_actual,
+                    "duration_sec": round(duration, 2),
+                    "court_detected": court.last_valid_H is not None,
+                    "scene_cuts": court.scene_cuts,
+                },
+                **buf.get_summary(),
+                "rallies": buf.rally_results,
+            }
 
-    with out_json.open("w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+            with out_json.open("w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
 
-    elapsed = time.perf_counter() - t0_total
-    eff_fps = total_frames_actual / elapsed if elapsed > 0 else 0
-    print(f"\n[TIMING] {total_frames_actual} frames, {duration:.1f}s video, "
-          f"processed in {elapsed:.1f}s → {eff_fps:.1f} effective fps\n")
+            elapsed = time.perf_counter() - t0_total
+            eff_fps = total_frames_actual / elapsed if elapsed > 0 else 0
+            print(f"\n[TIMING] {total_frames_actual} frames, {duration:.1f}s video, "
+                  f"processed in {elapsed:.1f}s → {eff_fps:.1f} effective fps\n")
 
-    if progress_cb:
-        progress_cb(100, 100)
+            if progress_cb:
+                progress_cb(100, 100)
 
+        finally:
+            clear_log_file()
+
+    host_data = os.getenv("HOST_DATA_DIR", "").rstrip("/")
+    if host_data:
+        from config import DATA_DIR as _DATA_DIR
+        display_log = Path(host_data) / log_path.relative_to(_DATA_DIR)
+    else:
+        display_log = log_path
+    print(f"[analyze] log → {display_log}")
     return str(out_json), str(out_video)

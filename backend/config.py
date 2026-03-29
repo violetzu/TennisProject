@@ -14,13 +14,13 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-VIDEO_DIR       = BASE_DIR / "videos"
-DATA_DIR        = BASE_DIR / "data"
-CHUNK_DIR       = VIDEO_DIR / "_chunks"
-GUEST_VIDEO_DIR = VIDEO_DIR / "guest"
+DATA_DIR  = BASE_DIR / "data"
+USERS_DIR = DATA_DIR / "users"
+GUEST_DIR = DATA_DIR / "guest"
+CHUNK_DIR = DATA_DIR / "videos_chunks"
 
-for _d in (VIDEO_DIR, DATA_DIR, CHUNK_DIR, GUEST_VIDEO_DIR):
-    _d.mkdir(exist_ok=True)
+for _d in (DATA_DIR, USERS_DIR, GUEST_DIR, CHUNK_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
 
 # ── Media ─────────────────────────────────────────────────────────────────────
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
@@ -52,7 +52,7 @@ class DBConfig:
     @property
     def url(self) -> str:
         return (
-            f"mysql+pymysql://{self.user}:{self.password}"
+            f"postgresql+psycopg2://{self.user}:{self.password}"
             f"@{self.host}:{self.port}/{self.database}"
         )
 
@@ -71,11 +71,11 @@ VLLM = VLLMConfig(
 )
 
 DB = DBConfig(
-    user     = os.getenv("MYSQL_USER",     "admin"),
-    password = os.getenv("MYSQL_PASSWORD", "password"),
-    host     = os.getenv("MYSQL_HOST",     "mysql"),
-    port     = os.getenv("MYSQL_PORT",     "3306"),
-    database = os.getenv("MYSQL_DATABASE", "tennis_db"),
+    user     = os.getenv("POSTGRES_USER",     "admin"),
+    password = os.getenv("POSTGRES_PASSWORD", "password"),
+    host     = os.getenv("POSTGRES_HOST",     "postgres"),
+    port     = os.getenv("POSTGRES_PORT",     "5432"),
+    database = os.getenv("POSTGRES_DB",       "tennis_db"),
 )
 
 _secret = os.getenv("SECRET_KEY", "")

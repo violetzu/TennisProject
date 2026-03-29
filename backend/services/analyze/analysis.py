@@ -7,12 +7,10 @@
   - smooth()                    滑動平均平滑
   - compute_frame_speeds_world() 逐幀球速（世界座標，km/h）
   - detect_events()             手腕距離法擊球 + vy 反轉觸地偵測
-  - segment_rallies()           依時間間隔 + 切鏡切割回合
   - bounce_zone()               落地區域分類
   - player_court_zone()         球員站位區域分類
   - assign_court_side()         半場歸屬判定
   - find_serve_index()          發球偵測（越網判定）
-  - determine_winners()         VLM 回合勝負判斷
   - find_winner_landing()       勝利球落點
 """
 
@@ -131,7 +129,7 @@ def detect_events(
     fps: float,
     scene_cut_frames: List[int],
     frame_offset: int = 0,
-) -> Tuple[List[int], List[int], Dict[int, float]]:
+) -> Tuple[List[int], List[int]]:
     """
     第一性原理事件偵測：球靠近手腕 = 擊球，軌跡反轉且遠離所有人 = 觸地。
 
@@ -144,7 +142,7 @@ def detect_events(
       - 球軌跡 vy 由正→負（下→上）反轉且遠離所有球員 → bounce
 
     Returns:
-        (contact_frames, bounce_frames, confidence)
+        (contact_frames, bounce_frames)
     """
     pos = ball_positions  # 已在呼叫端插值
     n = len(pos)
@@ -197,7 +195,6 @@ def detect_events(
     # ── 擊球：球-手腕距離的局部最小值（延遲確認）─────────────────────
     contacts: List[int] = []
     bounces: List[int] = []
-    confidence: Dict[int, float] = {}
     last_event = -100
     last_event_type = ""
     last_event_player = ""
@@ -329,9 +326,7 @@ def detect_events(
                 print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
                       f"serve toss but ball never reached opponent court")
                 return
-            conf = min(0.90, 0.5 + 0.3 * (1.0 - pd / hit_radius))
             contacts.append(pi)
-            confidence[pi] = conf
             last_event_type = "contact"
             last_event = pi
             last_event_player = pp
@@ -353,9 +348,7 @@ def detect_events(
         if len(fwd_trail) < fwd_min_pts:
             # 備援：快速擊球可能追丟，但球確實進入對方場地
             if _in_opp_court(pi, pp, serve_cross):
-                conf = min(0.85, 0.5 + 0.3 * (1.0 - pd / hit_radius))
                 contacts.append(pi)
-                confidence[pi] = conf
                 last_event_type = "contact"
                 last_event = pi
                 last_event_player = pp
@@ -383,9 +376,7 @@ def detect_events(
         if not in_court:
             # 備援：發球殘留軌跡在頂部，但球確實進入對方場地（快速發球）
             if _in_opp_court(pi, pp, serve_cross):
-                conf = min(0.85, 0.5 + 0.3 * (1.0 - pd / hit_radius))
                 contacts.append(pi)
-                confidence[pi] = conf
                 last_event_type = "contact"
                 last_event = pi
                 last_event_player = pp
@@ -395,9 +386,7 @@ def detect_events(
             print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
                   f"trajectory not in court (out-of-play)")
             return
-        conf = min(0.95, 0.5 + 0.5 * (1.0 - pd / hit_radius))
         contacts.append(pi)
-        confidence[pi] = conf
         last_event_type = "contact"
         last_event = pi
         last_event_player = pp
@@ -485,12 +474,11 @@ def detect_events(
             continue
 
         bounces.append(i)
-        confidence[i] = 0.85
         print(f"  [bounce] f={i + frame_offset} t={(i + frame_offset)/fps:.2f}s "
               f"d_nearest={f'{d:.0f}' if d is not None else 'inf'}")
 
     print(f"[detect_events] {len(contacts)} hits, {len(bounces)} bounces")
-    return contacts, bounces, confidence
+    return contacts, bounces
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -594,35 +582,6 @@ def find_serve_index(
         if side != first_side:
             return ci - 1
     return 0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# VLM 回合勝負判斷
-# ─────────────────────────────────────────────────────────────────────────────
-
-def determine_winners(
-    rally_groups: List[List[int]],
-    thumb_dir,
-    fps: float,
-    vllm_cfg,
-    progress_cb=None,
-    progress_start: int = 97,
-    progress_end: int = 99,
-) -> Dict[int, str]:
-    """逐回合呼叫 VLM 判斷勝負，回傳 {rally_idx: 'top'|'bottom'|'unknown'}。"""
-    from .vlm_verify import verify_rally_winner
-
-    results: Dict[int, str] = {}
-    for ri, rc in enumerate(rally_groups):
-        if not rc:
-            continue
-        next_f = rally_groups[ri + 1][0] if ri + 1 < len(rally_groups) else None
-        results[ri] = verify_rally_winner(rc[-1], next_f, thumb_dir, fps, vllm_cfg)
-        if progress_cb:
-            span = progress_end - progress_start
-            pct = progress_start + int((ri + 1) / max(len(rally_groups), 1) * span)
-            progress_cb(pct, 100)
-    return results
 
 
 # ─────────────────────────────────────────────────────────────────────────────

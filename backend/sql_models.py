@@ -1,8 +1,9 @@
 # sql_models.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -27,7 +28,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     records = relationship(
         "AnalysisRecord",
@@ -74,12 +75,11 @@ class AnalysisRecord(Base):
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
 
-    analysis_json_path = Column(String(500), nullable=True) # e.g. /data/world_info_xxx.json，分析結果的 JSON 路徑
-    yolo_video_path = Column(String(500), nullable=True) # e.g. /videos/owner_id/xxx.mp4，YOLO 標註後影片的 路徑
+    analysis_done = Column(Boolean, nullable=False, default=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     deleted_at = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     owner = relationship("User", back_populates="records")
     messages = relationship(
@@ -103,6 +103,6 @@ class AnalysisMessage(Base):
 
     role = Column(String(20), nullable=False)  # user/assistant/system
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     record = relationship("AnalysisRecord", back_populates="messages")

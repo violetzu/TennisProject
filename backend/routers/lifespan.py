@@ -5,17 +5,17 @@ import asyncio
 import shutil
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 
-from config import ALLOWED_EXT, VIDEO_DIR, CHUNK_DIR, GUEST_VIDEO_DIR
+from config import GUEST_DIR, CHUNK_DIR
 from database import SessionLocal
 from services.utils import get_yolo_models
 from sql_models import AnalysisRecord
-from .utils import safe_under_video_dir
+from .utils import safe_under_data_dir
 
 CHUNK_MAX_AGE       = 60 * 60           # 1 小時
 GUEST_MAX_AGE_DAYS  = 7
@@ -51,25 +51,19 @@ async def _cleanup_loop() -> None:
             now = time.time()
 
             # 1. Chunks
-            chunks_root = CHUNK_DIR
-            if chunks_root.exists():
-                for d in chunks_root.iterdir():
+            if CHUNK_DIR.exists():
+                for d in CHUNK_DIR.iterdir():
                     if d.is_dir() and _is_expired(d, CHUNK_MAX_AGE, now):
                         _remove(d)
 
-            # 2. Guest videos
-            guest_root = GUEST_VIDEO_DIR
-            if guest_root.exists():
-                for f in guest_root.iterdir():
-                    if (
-                        f.is_file()
-                        and f.suffix.lower() in ALLOWED_EXT
-                        and _is_expired(f, GUEST_VIDEO_MAX_AGE, now)
-                    ):
-                        _remove(f)
+            # 2. Guest folders（逾期整個資料夾刪除）
+            if GUEST_DIR.exists():
+                for folder in GUEST_DIR.iterdir():
+                    if folder.is_dir() and _is_expired(folder, GUEST_VIDEO_MAX_AGE, now):
+                        _remove(folder)
 
-            # 3. DB guest records + related files
-            cutoff = datetime.utcnow() - timedelta(days=GUEST_MAX_AGE_DAYS)
+            # 3. DB guest records + 資料夾
+            cutoff = datetime.now(timezone.utc) - timedelta(days=GUEST_MAX_AGE_DAYS)
 
             task_db = SessionLocal()
             try:
@@ -82,16 +76,10 @@ async def _cleanup_loop() -> None:
                     .all()
                 )
                 for rec in old_recs:
-                    for path_str in (
-                        rec.raw_video_path,
-                        rec.yolo_video_path,
-                        rec.analysis_json_path,
-                    ):
-                        if not path_str:
-                            continue
-                        p = Path(path_str)
-                        if safe_under_video_dir(p) and p.exists():
-                            _remove(p)
+                    if rec.raw_video_path:
+                        folder = Path(rec.raw_video_path).parent
+                        if safe_under_data_dir(folder):
+                            _remove(folder)
                     task_db.delete(rec)
 
                 if old_recs:

@@ -13,17 +13,6 @@ class RegisterRequest(BaseModel):
             raise ValueError("password 最多 72 bytes")
         return v
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-    @field_validator("password")
-    @classmethod
-    def password_max_72_bytes(cls, v: str):
-        if len(v.encode("utf-8")) > 72:
-            raise ValueError("password 最多 72 bytes")
-        return v
-
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

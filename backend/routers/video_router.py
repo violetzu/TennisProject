@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -15,11 +15,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import get_current_user, get_current_user_optional
-from config import ALLOWED_EXT, VIDEO_DIR, CHUNK_DIR, GUEST_VIDEO_DIR
+from config import ALLOWED_EXT, DATA_DIR, CHUNK_DIR
 from database import get_db
 from services.utils import get_video_meta
 from sql_models import AnalysisMessage, AnalysisRecord, User
-from .utils import assert_under_video_dir, make_session_payload
+from .utils import assert_under_data_dir, make_session_payload
 
 # decord / vLLM 只支援 H.264 / H.265；AV1、VP9 等需要先轉碼
 _NEED_TRANSCODE_CODECS = {"av1", "vp9", "vp8", "theora"}
@@ -27,23 +27,33 @@ _NEED_TRANSCODE_CODECS = {"av1", "vp9", "vp8", "theora"}
 router = APIRouter(prefix="/api", tags=["video"])
 
 # ── Path helpers ──────────────────────────────────────────────────────────────
+def _video_folder(owner_id: Optional[int], token: str) -> Path:
+    """建立並回傳影片專屬資料夾（token 為目錄名）。"""
+    if owner_id is not None:
+        folder = DATA_DIR / "users" / str(owner_id) / token
+    else:
+        folder = DATA_DIR / "guest" / token
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def _user_video_path(owner_id: int, token: str, ext: str) -> Path:
-    root = VIDEO_DIR / "users" / str(owner_id)
-    root.mkdir(parents=True, exist_ok=True)
-    return root / f"{token}{ext}"
+    return _video_folder(owner_id, token) / f"raw{ext}"
 
 
 def _guest_video_path(token: str, ext: str) -> Path:
-    return GUEST_VIDEO_DIR / f"{token}{ext}"
+    return _video_folder(None, token) / f"raw{ext}"
 
 
 def _rel_video_url(vpath: Path) -> str:
-    rel = vpath.resolve().relative_to(VIDEO_DIR.resolve()).as_posix()
+    rel = vpath.resolve().relative_to(DATA_DIR.resolve()).as_posix()
     return f"/videos/{rel}"
 
 
 def _safe_ext(name: str) -> str:
-    ext = os.path.splitext(name)[1].lower() or ".mp4"
+    ext = os.path.splitext(name)[1].lower()
+    if not ext:
+        raise HTTPException(400, "檔名缺少副檔名")
     if ext not in ALLOWED_EXT:
         raise HTTPException(400, "格式錯誤")
     return ext
@@ -153,30 +163,32 @@ def _bg_transcode(record_id: int, src: Path, sid: str, session_store: dict) -> N
         if new_path == src:
             return  # 不需要轉碼
 
+        # 轉碼後的暫存檔（raw_h264.mp4）改名回 raw.mp4（原檔已被刪除）
+        final_path = new_path.parent / "raw.mp4"
+        new_path.rename(final_path)
+        new_path = final_path
+
         meta = get_video_meta(str(new_path))
         task_db = SessionLocal()
         try:
             r = task_db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
             if r:
-                r.raw_video_path = str(new_path)
-                r.ext            = new_path.suffix.lstrip(".")
-                r.size_bytes     = new_path.stat().st_size
+                r.size_bytes = new_path.stat().st_size
                 if meta.get("duration"):
                     r.duration = float(meta["duration"])
                 if meta.get("fps"):
                     r.fps = float(meta["fps"])
                 if meta.get("frame_count"):
                     r.frame_count = int(meta["frame_count"])
-                r.updated_at = datetime.utcnow()
+                r.updated_at = datetime.now(timezone.utc)
                 task_db.commit()
         finally:
             task_db.close()
 
-        # 同步更新 in-memory session
+        # 同步更新 in-memory session（路徑不變，仍是 raw.mp4）
         sess = session_store.get(sid)
         if sess:
-            sess["raw_video_path"] = str(new_path)
-            sess["transcoding"]    = False
+            sess["transcoding"] = False
 
         print(f"[transcode] record_id={record_id} 轉碼完成 → {new_path.name}")
     except Exception as e:
@@ -239,13 +251,12 @@ def _load_recent_history(db: Session, record_id: int, limit: int = 40) -> List[D
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 class VideoListResponseItem(BaseModel):
-    id:                 int
-    video_name:         str
-    size_bytes:         Optional[int]  = None
-    created_at:         datetime
-    updated_at:         datetime
-    analysis_json_path: Optional[str]  = None
-    yolo_video_path:    Optional[str]  = None
+    id:            int
+    video_name:    str
+    size_bytes:    Optional[int] = None
+    created_at:    datetime
+    updated_at:    datetime
+    analysis_done: bool = False
 
 
 class VideoListResponse(BaseModel):
@@ -332,10 +343,9 @@ async def upload_complete(
             frame_count=int(meta.get("frame_count") or 0) or None,
             width=int(meta.get("width") or 0) or None,
             height=int(meta.get("height") or 0) or None,
-            analysis_json_path=None,
-            yolo_video_path=None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            analysis_done=False,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             deleted_at=None,
         )
         db.add(rec)
@@ -400,8 +410,7 @@ def videolist(
             size_bytes=r.size_bytes,
             created_at=r.created_at,
             updated_at=r.updated_at,
-            analysis_json_path=r.analysis_json_path,
-            yolo_video_path=r.yolo_video_path,
+            analysis_done=r.analysis_done,
         )
         for r in rows
     ])
@@ -425,17 +434,15 @@ def delete_video(
     if not rec:
         raise HTTPException(404, "紀錄不存在")
 
-    for path_str in (rec.raw_video_path, rec.yolo_video_path, rec.analysis_json_path):
-        if not path_str:
-            continue
+    if rec.raw_video_path:
         try:
-            p = Path(path_str)
-            assert_under_video_dir(p)
-            p.unlink(missing_ok=True)
+            folder = Path(rec.raw_video_path).parent
+            assert_under_data_dir(folder)
+            shutil.rmtree(folder, ignore_errors=True)
         except Exception:
             pass
 
-    rec.deleted_at = datetime.utcnow()
+    rec.deleted_at = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True}
 
@@ -462,9 +469,14 @@ def analysisrecord(
             raise HTTPException(403, "guest_token 錯誤或缺少")
 
     vpath = Path(rec.raw_video_path)
-    assert_under_video_dir(vpath)
+    assert_under_data_dir(vpath)
     if not vpath.exists():
         raise HTTPException(400, "找不到影片檔案（可能已過期清理）")
+
+    folder     = vpath.parent
+    json_path  = folder / "analysis.json"
+    video_path = folder / "analysis.mp4"
+    has_analysis = rec.analysis_done and json_path.exists()
 
     sid     = uuid.uuid4().hex
     history = _load_recent_history(db, rec.id, limit=40)
@@ -492,13 +504,13 @@ def analysisrecord(
                 "size_bytes":  rec.size_bytes,
                 "ext":         rec.ext,
             },
-            "analysis_json_path": rec.analysis_json_path,
-            "yolo_video_url":     _rel_video_url(Path(rec.yolo_video_path))if rec.yolo_video_path else None,
-            "created_at":         rec.created_at,
-            "updated_at":         rec.updated_at,
-            "owner_id":           rec.owner_id,
+            "analysis_done":  has_analysis,
+            "yolo_video_url": _rel_video_url(video_path) if has_analysis and video_path.exists() else None,
+            "created_at":     rec.created_at,
+            "updated_at":     rec.updated_at,
+            "owner_id":       rec.owner_id,
         },
-        "world_data":  _read_world_data(rec.analysis_json_path),
+        "world_data":  _read_world_data(str(json_path)) if has_analysis else None,
         "guest_token": rec.guest_token if rec.owner_id is None else None,
         "history":     history,
     }

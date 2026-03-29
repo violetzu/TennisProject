@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -12,10 +13,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import get_current_user_optional
-from config import ALLOWED_EXT, VIDEO_DIR, DATA_DIR
+from config import ALLOWED_EXT
 from database import SessionLocal, get_db
 from sql_models import AnalysisMessage, AnalysisRecord, User
-from .utils import assert_under_video_dir, build_session_snapshot, get_session_or_404, make_session_payload
+from .utils import assert_under_data_dir, build_session_snapshot, get_session_or_404, make_session_payload
 
 from services.analyze.main import analyze_combine
 
@@ -34,15 +35,15 @@ class ReanalyzeRequest(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _safe_unlink(path_str: Optional[str]) -> None:
-    if not path_str:
-        return
-    try:
-        p = Path(path_str)
-        assert_under_video_dir(p)
-        p.unlink(missing_ok=True)
-    except Exception:
-        pass
+def _cleanup_analysis_files(raw_video_path: str) -> None:
+    folder = Path(raw_video_path).parent
+    for name in ("analysis.mp4", "analysis.json", "analysis.log"):
+        f = folder / name
+        try:
+            assert_under_data_dir(f)
+            f.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -67,12 +68,10 @@ def reanalyze(
         if not req.guest_token or req.guest_token != rec.guest_token:
             raise HTTPException(403, "guest_token 錯誤或缺少")
 
-    _safe_unlink(rec.yolo_video_path)
-    _safe_unlink(rec.analysis_json_path)
+    _cleanup_analysis_files(rec.raw_video_path)
 
-    rec.analysis_json_path = None
-    rec.yolo_video_path    = None
-    rec.updated_at         = datetime.utcnow()
+    rec.analysis_done = False
+    rec.updated_at    = datetime.now(timezone.utc)
 
     db.query(AnalysisMessage).filter(
         AnalysisMessage.analysis_record_id == rec.id
@@ -144,6 +143,8 @@ async def analyze_combine_api(
             remaining = None
         sess["eta_seconds"] = round(remaining) if remaining is not None else None
 
+    video_folder = vpath.parent  # DATA_DIR/users/{id}/{token}/ 或 DATA_DIR/guest/{token}/
+
     async def runner():
         try:
             json_path, video_path = await asyncio.to_thread(
@@ -153,7 +154,7 @@ async def analyze_combine_api(
                 request.app.state.yolo_ball_model,
                 request.app.state.yolo_pose_model,
                 request.app.state.yolo_court_model,
-                str(DATA_DIR),
+                str(video_folder),
                 job_id,
                 width=rec.width,
                 height=rec.height,
@@ -170,10 +171,9 @@ async def analyze_combine_api(
             try:
                 r = task_db.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
                 if r:
-                    r.analysis_json_path = json_path
-                    r.yolo_video_path    = video_path
-                    r.session_id         = req.session_id
-                    r.updated_at         = datetime.utcnow()
+                    r.analysis_done = True
+                    r.session_id    = req.session_id
+                    r.updated_at    = datetime.now(timezone.utc)
                     task_db.commit()
             finally:
                 task_db.close()
@@ -181,8 +181,7 @@ async def analyze_combine_api(
             sess.update(status="completed", progress=100)
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            print(traceback.format_exc())
             sess.update(status="failed", error=str(e), progress=0)
 
     asyncio.create_task(runner())

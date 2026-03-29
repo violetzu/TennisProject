@@ -23,7 +23,7 @@ from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .ball import BallTracker, WINDOW_SEC, draw_ball_trail, process_window
+from .ball import BallTracker, WINDOW_SEC, draw_ball_trail, finalize_extras
 from .court import CourtDetector, draw_court
 from .player import draw_skeleton_from_data
 from .analysis import (
@@ -34,6 +34,7 @@ from .analysis import (
 )
 from .aggregate import build_single_rally, build_summary
 from .vlm_verify import verify_rally_winner
+from ._log import get_log_file, set_log_file, clear_log_file
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,11 +136,11 @@ class FrameBuffer:
             widx = self._write_idx
             slot = self._window[0]
 
-            # finalize positions
-            self._ball.finalize(
-                widx, self._court.scene_cut_set, self._finalized,
-                [self._pos.player_top, self._pos.player_bottom,
-                 self._pos.wrist_top, self._pos.wrist_bottom])
+            prev_final = self._finalized[0]
+            self._ball.finalize(widx, self._court.scene_cut_set, self._finalized)
+            finalize_extras(widx, prev_final, self._fps, self._court.scene_cut_set,
+                            [self._pos.player_top, self._pos.player_bottom,
+                             self._pos.wrist_top, self._pos.wrist_bottom])
 
             self._route_frame(slot, widx)
             self._write_idx += 1
@@ -174,11 +175,11 @@ class FrameBuffer:
         """處理滑動窗口最舊的一幀：finalize → route。"""
         widx = self._write_idx
 
-        # finalize positions（ball filter + interp + player/wrist interp）
-        self._ball.finalize(
-            widx, self._court.scene_cut_set, self._finalized,
-            [self._pos.player_top, self._pos.player_bottom,
-             self._pos.wrist_top, self._pos.wrist_bottom])
+        prev_final = self._finalized[0]
+        self._ball.finalize(widx, self._court.scene_cut_set, self._finalized)
+        finalize_extras(widx, prev_final, self._fps, self._court.scene_cut_set,
+                        [self._pos.player_top, self._pos.player_bottom,
+                         self._pos.wrist_top, self._pos.wrist_bottom])
 
         slot = self._window[0]
         self._route_frame(slot, widx)
@@ -257,7 +258,7 @@ class FrameBuffer:
 
         seg_cuts = [sc - ctx_s for sc in self._court.scene_cuts
                     if ctx_s <= sc <= ctx_e]
-        contacts, bounces, confidence = detect_events(
+        contacts, bounces = detect_events(
             self._ball.all_positions[ctx_s:ctx_e + 1],
             self._pos.wrist_top[ctx_s:ctx_e + 1],
             self._pos.wrist_bottom[ctx_s:ctx_e + 1],
@@ -296,14 +297,18 @@ class FrameBuffer:
             widx_k = seg_s + k
             self._draw_and_encode(slot, widx_k)
 
-        # ── 4. 球速計算 ──────────────────────────────────────────────────
+        # ── 4. 球速計算（僅計算回合段，避免全片重掃）──────────────────
         H = self._court.last_valid_H
+        spd_s = max(0, seg_s - int(self._fps))
+        spd_e = min(len(self._ball.all_positions) - 1,
+                    seg_e + int(self._fps * 3))
         if H is not None:
             raw_speeds = compute_frame_speeds_world(
-                self._ball.all_positions, self._fps, H)
+                self._ball.all_positions[spd_s:spd_e + 1], self._fps, H)
         else:
-            raw_speeds = [None] * len(self._ball.all_positions)
+            raw_speeds = [None] * (spd_e - spd_s + 1)
         smooth_speeds = smooth(raw_speeds, 5)
+        speed_offset = spd_s
 
         # ── 5. 按間隔分割 contacts → 分別 build_single_rally ─────────────
         if abs_contacts:
@@ -337,6 +342,7 @@ class FrameBuffer:
                     bounces_f=group_bounces,
                     pos_interp=self._ball.all_positions,
                     smooth_speeds=smooth_speeds,
+                    speed_offset=speed_offset,
                     all_player_top=self._pos.player_top,
                     all_player_bottom=self._pos.player_bottom,
                     scene_cut_frames=self._court.scene_cuts,
@@ -354,11 +360,23 @@ class FrameBuffer:
 
                 # ── 6. VLM 背景判斷 ──────────────────────────────────────
                 local_idx = len(self.rally_results) - 1
-                future = self._vlm_executor.submit(
-                    verify_rally_winner,
-                    group_contacts[-1], next_start,
-                    self._thumb_dir, self._fps, self._vllm_cfg,
-                )
+                _lf = get_log_file()
+                _contact = group_contacts[-1]
+                _next = next_start
+                _tdir = self._thumb_dir
+                _fps = self._fps
+                _vcfg = self._vllm_cfg
+
+                def _vlm_task(lf=_lf, c=_contact, n=_next, td=_tdir, fps=_fps, vc=_vcfg):
+                    if lf:
+                        set_log_file(lf)
+                    try:
+                        return verify_rally_winner(c, n, td, fps, vc)
+                    finally:
+                        if lf:
+                            clear_log_file()
+
+                future = self._vlm_executor.submit(_vlm_task)
                 self._vlm_futures.append((local_idx, future))
 
         # 清理 rally 狀態

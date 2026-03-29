@@ -42,11 +42,17 @@ def _speed_stats(speeds: List[float]) -> Dict:
 SPEED_LOOK_AHEAD_SEC = 0.4  # 擊球後找球速峰值的時間窗口
 
 def _get_speed_after(
-    frame_idx: int, smooth_speeds: List[Optional[float]], look_ahead: int = 12,
+    frame_idx: int,
+    smooth_speeds: List[Optional[float]],
+    look_ahead: int = 12,
+    speed_offset: int = 0,
 ) -> Optional[float]:
+    adj = frame_idx - speed_offset
+    if adj < 0 or adj >= len(smooth_speeds):
+        return None
     peaks = [
         smooth_speeds[j]
-        for j in range(frame_idx, min(frame_idx + look_ahead, len(smooth_speeds)))
+        for j in range(adj, min(adj + look_ahead, len(smooth_speeds)))
         if smooth_speeds[j] is not None and smooth_speeds[j] >= MIN_BALL_SPEED_KMH
     ]
     return round(max(peaks), 1) if peaks else None
@@ -63,6 +69,7 @@ def build_single_rally(
     bounces_f: List[int],
     pos_interp: List[Optional[Tuple[float, float]]],
     smooth_speeds: List[Optional[float]],
+    speed_offset: int = 0,
     all_player_top: List[Optional[Tuple[float, float]]],
     all_player_bottom: List[Optional[Tuple[float, float]]],
     scene_cut_frames: List[int],
@@ -139,7 +146,8 @@ def build_single_rally(
         is_serve = (seq == 0)
         shot_type = "serve" if is_serve else vlm_shot_types.get(fi, "unknown")
         speed = _get_speed_after(fi, smooth_speeds,
-                                 look_ahead=max(1, int(SPEED_LOOK_AHEAD_SEC * fps)))
+                                 look_ahead=max(1, int(SPEED_LOOK_AHEAD_SEC * fps)),
+                                 speed_offset=speed_offset)
         x_norm, y_norm = _pn(ball_pos)
 
         plist = all_player_top if player == "top" else all_player_bottom

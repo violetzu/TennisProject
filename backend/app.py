@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from config import VIDEO_DIR
+from config import DATA_DIR
 from database import Base, engine
 from routers.lifespan import lifespan
 from routers.analyze_router import router as analyze_router
@@ -18,7 +18,7 @@ app = FastAPI(title="Tennis Video Backend", lifespan=lifespan)
 
 app.state.session_store = {}
 
-app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
+app.mount("/videos", StaticFiles(directory=DATA_DIR), name="videos")
 
 app.add_middleware(
     CORSMiddleware,

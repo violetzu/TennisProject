@@ -45,7 +45,7 @@ type AnalysisRecordResp = {
     video_name: string;
     video_url: string;
     meta: RecordMeta;
-    analysis_json_path: string | null;
+    analysis_done: boolean;
     yolo_video_url: string | null;
   };
   world_data: any | null;
@@ -82,7 +82,7 @@ export function useCurrentRecord() {
         video_url: r.video_url,
         yolo_video_url: r.yolo_video_url ?? null,
         meta: r.meta ?? {},
-        has_analysis: !!r.analysis_json_path,
+        has_analysis: r.analysis_done,
         has_yolo: !!r.yolo_video_url,
         world_data: data.world_data ?? null,
         history: data.history ?? [],

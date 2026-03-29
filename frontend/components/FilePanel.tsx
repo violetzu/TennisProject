@@ -10,8 +10,7 @@ type VideoItem = {
   size_bytes?: number | null;
   created_at: string;
   updated_at: string;
-  analysis_json_path?: string | null;
-  yolo_video_path?: string | null;
+  analysis_done: boolean;
 };
 
 function fmtBytes(n?: number | null) {
@@ -24,8 +23,7 @@ function fmtBytes(n?: number | null) {
 }
 
 function statusLabel(item: VideoItem) {
-  if (item.yolo_video_path || item.analysis_json_path) return "✅ 已分析";
-  return "⬜ 未分析";
+  return item.analysis_done ? "✅ 已分析" : "⬜ 未分析";
 }
 
 export default function FilePanel({

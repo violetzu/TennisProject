@@ -17,7 +17,7 @@ import cv2
 import numpy as np
 import requests
 
-from config import VIDEO_DIR, VIDEO_URL_DOMAIN
+from config import DATA_DIR, VIDEO_URL_DOMAIN
 
 # ── 常數 ──────────────────────────────────────────────────────────────────────
 THUMB_STRIDE_SEC         = 0.17  # 每 N 秒儲存一張縮圖
@@ -109,7 +109,7 @@ class ThumbnailWriter:
 
 def _thumb_to_url(thumb_path: Path) -> str:
     """縮圖絕對路徑 → vLLM 可抓取的 HTTP URL。"""
-    rel = thumb_path.resolve().relative_to(VIDEO_DIR.resolve()).as_posix()
+    rel = thumb_path.resolve().relative_to(DATA_DIR.resolve()).as_posix()
     return f"{VIDEO_URL_DOMAIN}/videos/{rel}"
 
 

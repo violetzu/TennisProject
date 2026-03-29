@@ -522,147 +522,211 @@ def analyze_combine(
 
 | 進度 | 階段 |
 |---|---|
-| 0–95% | 逐幀偵測 + 滑動窗口處理 + 回合感知繪製/寫出 |
-| 95–97% | 事件偵測 + 球速計算 |
-| 97–99% | VLM 回合勝負判斷 |
-| 99–100% | 統計彙整 → JSON 寫出 |
+| 0–95% | 逐幀偵測（場地＋Pose＋Ball）＋滑動窗口定案＋回合感知暫存/輸出；回合結束時即時完成 detect_events＋build_rally＋VLM 背景提交 |
+| 95–97% | `buf.flush_remaining()`（清空窗口剩餘幀＋最後回合 buffer）＋ `thumbs.close()` |
+| 97–100% | `buf.wait_vlm()`（等待背景 VLM future）→ JSON 彙整寫出 → `progress_cb(100,100)` |
 
 
 #### 5.10.3 處理流程
 
-**偵測 → 滑動窗口（過濾+插值）→ 回合感知繪製/寫出（0–95%）**
+**模組職責分工**
 
-核心原則：**所有位置資料在滑動窗口中統一過濾+插值後定案，畫面和後續分析用同一份資料。**
+| 模組 | 類別/函式 | 職責 |
+|---|---|---|
+| `video_io.py` | `VideoPipe` | FFmpeg decode/encode 子程序管線，context manager |
+| `court.py` | `CourtDetector` | YOLO 場地偵測、Homography、scene_cut 追蹤 |
+| `player.py` | `PoseDetector` | Pose 偵測 + 球員歸屬，骨架資料延後繪製 |
+| `ball.py` | `BallTracker` | 球偵測、重捕獲、靜止黑名單、位置歷史、sliding window finalize |
+| `buffer.py` | `FrameBuffer` | 滑動窗口定案 + 回合感知暫存/輸出 + per-rally 分析 |
+| `buffer.py` | `PositionStore` | 球員/手腕/ball_owner 位置累計容器 |
+| `buffer.py` | `FrameSlot` | 單幀資料容器（frame, court_valid, skel_data, court_draw_data） |
+| `analysis.py` | `detect_events` | 擊球/觸地偵測，產出 contacts + bounces |
+| `aggregate.py` | `build_single_rally` / `build_summary` | rally JSON 組裝 + 全域統計 |
+| `vlm_verify.py` | `ThumbnailWriter` / `verify_rally_winner` | 非同步縮圖寫入 + 背景 VLM 勝負判斷 |
 
-```
-FFmpeg decode pipe → 逐幀 numpy array
-  ↓
-場地偵測（court_model, conf ≥ 0.8）
-  → 失敗（過場）→ 記錄 scene_cut，重置追蹤狀態，跳過 Pose/Ball，寫無標注幀
-  → 成功 → H_img_to_world（Homography）+ 14 個場地關鍵點
-  → draw_court()：繪製底線、邊線、中線、發球線
-  ↓
-Pose 偵測（yolo26n-pose.pt）
-  → detect_players()：上方/下方球員位置 + 手腕座標（COCO kp 9/10）
-  → draw_skeleton()：上方球員=綠色、下方球員=黃色（顏色由 constants.py 統一定義）
-  ↓
-Ball 偵測（best.pt，BallTracker 全域偵測 + 靜止黑名單 + 跳躍距離過濾）
-  → is_valid_ball()：邊緣位置篩選
-  → 單幀跳躍 > MAX_JUMP_RATIO=0.12 × 對角線 → 丟棄
-  → 連續 MISS_RESET_FRAMES=5 幀未偵測 → 重置 last_center 允許重新捕獲
-  → 靜止超過 STUCK_FRAMES_LIMIT=6 幀 → 記錄黑名單 90 幀
-  ↓
-每幀累計：ball_pos, player_top, player_bottom, wrist_top, wrist_bottom
-  ↓
-每 THUMB_STRIDE=5 幀儲存 320×180 縮圖（含場地+骨架標注）
-  ↓
-┌─ 滑動窗口 process_window()（WINDOW=30 幀延遲，每個位置只定案一次）
-│   ├─ 球：filter_outliers（迭代離群過濾，最多 3 pass）→ 插值（max_gap=30，方向檢查）
-│   │    ├─ 過濾：跟前後 ±6 幀比較，超距或 V 形尖刺 → 設為 None
-│   │    ├─ 插值：gap 兩端已知且不跨切鏡 → 線性插值
-│   │    └─ 方向檢查：gap 前後 vy 反號 → 不插值（避免跨越觸地/擊球反轉）
-│   └─ 人/手腕：只做插值（max_gap=15，不做離群過濾、不做方向檢查）
-│   → 結果原地寫回 all_ball_positions / all_player_* / all_wrist_*
-│   → finalized_up_to 追蹤：已定案的位置不再被後續窗口修改
-└─ _output_frame()：回合感知的輸出控制（見下方）
-```
+核心原則：**所有位置資料在滑動窗口中統一過濾+插值後定案；骨架與球軌跡延後到輸出時才繪製，確保畫面和分析用同一份定案資料。**
 
-**回合感知 frame 輸出（_output_frame）**
+---
 
-球軌跡顏色需要根據「最後是誰擊球」決定，而此資訊來自 `detect_events`（需要整段回合資料）。因此回合中的幀暫存到記憶體，回合結束後才跑 `detect_events` 並回頭畫軌跡。
+**主迴圈（0–95%）**
 
-```
-場地線 + 骨架 → 直接畫（始終正確）
-  ↓
-回合活動判定：球是否在任一手腕 WRIST_HIT_RADIUS 範圍內
-  → 切鏡 → 立刻 flush 回合 buffer
-  ↓
-├── 回合中（距上次 proximity < RALLY_GAP_SEC）
-│     → 暫存 frame.copy() 到記憶體 list
-│
-└── 非回合（間歇/尚未開始）
-      → flush 任何 pending buffer → _flush_rally_buf()
-      → 球軌跡：依球所在半場決定 owner 顏色
-      → 直接寫出 FFmpeg encode pipe
+```python
+with VideoPipe(vpath, out_video, w, h, fps) as pipe:
+    buf = FrameBuffer(WINDOW_SEC*fps, fps, w, h, pipe, ball, positions, court, ...)
+
+    for idx, frame in pipe.frames():           # FFmpeg decode → np.ndarray (h,w,3)
+        court.detect(frame, idx)               # CourtDetector
+
+        if not court.is_valid:                 # 過場 / 未偵測到
+            if idx in court.scene_cut_set:
+                ball.reset()                   # 重置重捕獲狀態
+            ball.append_none()
+            positions.append_none()
+            buf.push(FrameSlot(frame, False, [], None))
+            continue
+
+        # Pose（傳 court.corners + net_y 供球員篩選）
+        top, bot, tw, bw, skel = pose.detect(frame, w, h, court.corners, court.net_y)
+        # Ball
+        box = ball.detect(ball_model, frame, w, h, idx)
+
+        positions.append(top, bot, tw, bw)     # PositionStore
+        ball.append_position(box)
+
+        thumbs.maybe_save(frame, idx, court.get_draw_data(), skel,
+                          ball.all_positions, ball.max_trail_jump)  # 非同步縮圖
+
+        buf.push(FrameSlot(frame, True, skel, court.get_draw_data()))
+        # push 達 WINDOW 時自動 finalize + route（滿窗口才寫出）
 ```
 
-**回合 buffer flush（_flush_rally_buf）**
+**Ball 偵測細節（BallTracker.detect）**
 
 ```
-detect_events(segment ± margin 幀 context)
-  → margin = max(WRIST_SEARCH_WINDOW, SWING_CHECK_WINDOW) + 1 = 6
-  → 取得 contacts（擊球幀）、bounces（觸地幀）
+每幀：
+  1. 清除過期黑名單（expire_frame ≤ idx → 移除）
+  2. YOLO 推論 → extract_xyxy_conf → 過濾：
+       is_valid_ball()（y 不在極端邊緣）
+       黑名單半徑 STATIC_BLACKLIST_RADIUS=25px 過濾
+  3. 有候選 + 有 last_center → 丟棄跳躍 > MAX_JUMP_RATIO=0.12×對角線的候選
+     無候選且有 last_center → miss，全部丟棄
+  4. 重捕獲模式（last_center=None，REACQ_MAX_SEC=0.5s 倒數）：
+       使用寬鬆閾值 REACQ_JUMP_RATIO=0.25×對角線，避免遠端假陽性
+  5. 選信心最高的候選
+  6. stuck 偵測：位移 < STUCK_DIST_THRESHOLD=3px 連續 STUCK_SEC_LIMIT=0.2s → 黑名單
+  7. 記錄日誌：[ball] f={idx} t={idx/fps:.2f}s ... （每幀，絕對時間）
+```
+
+**滑動窗口（FrameBuffer._process_oldest / BallTracker.finalize）**
+
+```
+WINDOW_SEC=1.0s 延遲（幀數 = max(1, int(1.0 × fps))）
+  → push 達 maxlen → 彈出最舊幀前先呼叫 ball.finalize(write_idx, ...)
+  → process_window()：
+      球：filter_outliers（迭代離群過濾，±6 鄰居，最多 3 pass）→ 插值（方向檢查）
+      人/手腕：僅插值（max_gap=15，不做離群過濾）
+      跨 scene_cut → 禁止插值
+  → finalized list 追蹤，已定案的位置不再被修改
+```
+
+**回合感知路由（FrameBuffer._route_frame）**
+
+```
+每幀定案後 → _route_frame(slot, widx)：
+  proximity check：ball 是否在任一手腕 WRIST_HIT_RADIUS(8%img_h) 範圍內
+    → 是 → 更新 _last_prox_widx
+
+  in_rally = (widx - _last_prox_widx) < gap_frames（RALLY_GAP_SEC=3.5s × fps）
+
+  scene_cut → 強制 flush rally
+
+  回合中：
+    → 暫存 FrameSlot 到 _rally_slots（引用，不 copy）
+
+  非回合：
+    → 若有 pending rally → _flush_rally()
+    → ball_owner = 依球所在半場（上/下）
+    → _draw_and_encode(slot, widx)：畫 court + skeleton + ball trail → write to pipe
+```
+
+**回合 flush（FrameBuffer._flush_rally）**
+
+```
+margin = max(WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC,
+             SERVE_TOSS_LOOKBACK_SEC) × fps + 1
+  → ctx_s = max(0, seg_s - margin)；ctx_e = seg_e + margin
+
+detect_events(sliced positions, frame_offset=ctx_s)
+  → contacts（擊球幀）+ bounces（觸地幀）→ 轉絕對索引，只保留 seg 範圍內
   ↓
-assign_court_side(contact) → 推導 ball_owner → forward-fill
+assign_court_side(contact) → ball_owner → forward-fill ball_owner[seg_s..seg_e]
   ↓
-累計 contacts/bounces → 供 run_analysis 沿用（避免重複 detect_events）
+_draw_and_encode 所有 rally_slots（現在才畫 skeleton + ball trail + court）
   ↓
-遍歷暫存幀 → draw_ball_trail(owner color) → 寫出 encode pipe → 清空 buffer
+compute_frame_speeds_world → smooth(raw_speeds, 5)
+  ↓
+contacts 按 RALLY_GAP_SEC gap 拆成 contact_groups
+  → 每 group 各自：
+      build_single_rally(rally_idx, group_contacts, group_bounces, ...)
+        → rally JSON + stats
+      VLM 背景：ThreadPoolExecutor.submit(verify_rally_winner, last_contact, ...)
+        → Future 存入 _vlm_futures
+  ↓
+清空 _rally_start / _rally_slots
+```
+
+**繪製統一入口（FrameBuffer._draw_and_encode）**
+
+```
+draw_court(frame, corners, H=H, kps=kps)     # court lines（含中線 H 補算）
+draw_skeleton_from_data(frame, skel_data)    # 骨架，上方綠/下方黃
+draw_ball_trail(frame, widx, all_positions,
+                max_trail_jump, ball_owner, fps=fps)  # 軌跡著色
+pipe.write(frame)                             # → FFmpeg encode pipe
 ```
 
 **球軌跡著色**
 
 | 狀態 | 顏色策略 |
 |---|---|
-| 回合中 | 根據 detect_events 推導的 ball_owner：上方=綠色、下方=黃色 |
+| 回合中 | detect_events 推導的 ball_owner：上方=綠色、下方=黃色 |
 | 非回合 | 球在哪個半場就用哪個球員的顏色 |
-| 擊球漸變 | owner 切換時 ±GRADIENT_HALF=5 幀線性漸變 |
-| VLM 縮圖 | 單色 fallback（不帶 owner） |
+| owner 切換漸變 | ±GRADIENT_HALF_SEC × fps 幀線性漸變 |
 
 球員顏色定義在 `constants.py`：`COLOR_TOP=(0,255,0)` 綠、`COLOR_BOTTOM=(0,255,255)` 黃。
 
-**事件偵測 + 球速（95–97%）**（`analysis.py`）
-
-所有位置已在滑動窗口中定案，直接使用，不再重複插值或過濾。
+**事件偵測（`analysis.py` — detect_events）**
 
 ```
-detect_events(all_ball_positions, wrist_top, wrist_bottom, player_top, player_bottom, ...)
+detect_events(..., frame_offset=ctx_s)
+  → frame_offset：讓所有日誌輸出絕對時間 t=(fi+frame_offset)/fps
   → 擊球偵測（手腕距離法 + 延遲確認）：
       1. 逐幀計算球到最近手腕的距離
-      2. 找局部最小值（±WRIST_SEARCH_WINDOW=5 幀），距離 < WRIST_HIT_RADIUS（畫面高度 8%）
-      3. 延遲確認：球離開手腕範圍後才記錄（取停留期間距離最小的幀）
-         → 解決發球前拍球/持球反覆觸發的問題
-      4. 冷卻：不同球員交替 COOLDOWN_FRAMES=8、同一球員 SAME_PLAYER_COOLDOWN=20（防同次揮拍重複）、bounce 後 BOUNCE_COOLDOWN=4
-  → 觸地偵測（vy 反轉法）：
-      vy 由正→負（下→上反轉）且遠離所有球員（d > hit_radius × 2）→ bounce
-  → contacts_f + bounces_f 同時產出
-  ↓
-segment_rallies(contacts_f)  → 回合切割（gap > 3.5s 或切鏡邊界）
-  ↓
-compute_frame_speeds_world()  → 每幀球速（km/h）
+      2. 找局部最小值（±WRIST_SEARCH_SEC×fps），距離 < WRIST_HIT_RADIUS(8%img_h)
+      3. 延遲確認：球離開手腕範圍後才記錄（距離最小幀）
+      4. 冷卻：不同球員 COOLDOWN_SEC、同一球員 SAME_PLAYER_COOLDOWN_SEC、bounce 後 BOUNCE_COOLDOWN_SEC
+  → 擊球驗證（_commit_pending 三層）：
+      層 1：前向軌跡點數 ≥ fwd_min_pts（不足 → _in_opp_court 備援或拒絕）
+      層 2：前向位移 ≥ min_disp（靜止 → 拒絕）
+      層 3：前向軌跡在場地範圍內（不在場地 → _in_opp_court 備援或拒絕）
+  → 發球拋球路徑（_is_serve_toss）：
+      條件 A：球在擊球者頭頂上方，垂直距離 [2%,20%]img_h，水平 ≤25%img_w，vy 反轉
+      → 通過後仍需 _in_opp_court 驗證，否則拒絕
+  → _in_opp_court：SERVE_CROSS_SEC=3.0s 窗口，需連續 ≥ max(2, 0.1×fps) 點命中對方半場
+  → 觸地偵測：vy 由正→負（下→上）且遠離所有球員 → bounce
 ```
 
-**VLM 回合勝負判斷（97–99%）**（`analysis.py` → `determine_winners()` → `vlm_verify.py`）
+**收尾（95–100%）**
 
 ```
-determine_winners(rally_groups, thumb_dir, fps, vllm_cfg)
-  → 每回合：verify_rally_winner() 取最後一拍後最多 240 幀縮圖（最多 8 張）
-  → VLM 回傳 XML：<winner>top|bottom|unknown</winner>
-  ↓
-縮圖目錄 {job_id}_thumbs/ 刪除
+buf.flush_remaining()   → 清空窗口剩餘幀 + 最後回合 buffer
+thumbs.close()          → 縮圖執行緒結束
+# progress_cb(97, 100)
+buf.wait_vlm()          → 等待 ThreadPoolExecutor futures
+                        → _fill_outcome(rally_idx, winner) 填入 rally JSON
+                        → shutil.rmtree(thumb_dir)
+# VideoPipe.__exit__() → encoder stdin close + wait
+JSON 組裝（main.py）：
+  result = {metadata, **buf.get_summary(), rallies: buf.rally_results}
+  → build_summary() → summary + heatmap
+  → json.dump → analysis_{job_id}.json
+# progress_cb(100, 100)
 ```
 
-VLM 包在 try/except；失敗時繼續。進度條佔 2%。
-
-**統計彙整 → JSON（99–100%）**（`aggregate.py` → `build_rallies()`）
-
-判斷邏輯由 `analysis.py` 提供，`aggregate.py` 只負責格式化：
+**統計彙整（`aggregate.py` — `build_single_rally` / `build_summary`）**
 
 ```
-逐回合 → 逐拍：
-  發球偵測：find_serve_index()（找第一個越網的 contact）
+build_single_rally(rally_contacts, bounces_f, ...)：
   server：assign_court_side()（world 座標半場判定，fallback 像素 y 中線）
-  player 歸屬：assign_court_side()
-  is_serve：seq == 0（過濾後的第一拍）
-  shot_type：seq==0 → serve；其餘 → swing
-  speed_kmh：擊球後 12 幀內世界座標球速峰值
+  is_serve：seq == 0
+  shot_type：seq==0 → serve；其餘 → swing（VLM shot type 填入 vlm_shot_types）
+  speed_kmh：擊球後 12 幀內球速峰值（< 20km/h → null）
   player_zone：player_court_zone()（net/service/baseline）
+  outcome placeholder（type=unknown，等 VLM future 填入）
   ↓
-winner_player = vlm_winner_results.get(rally_idx)
-winner_land：find_winner_landing()（對方半場的 bounce 或 fallback 追蹤點）
-  ↓
-全域統計：speed（all/serves/rally）、depth（net/service/baseline）
-shots 不含發球；serves 單獨計入
+build_summary(rally_results, per_rally_stats)：
+  speed（all/serves/rally）、depth（net/service/baseline）
+  players.top/bottom：shots（不含 serve）+ serves + winners + shot_types
 ```
 
 #### 5.10.4 Analysis JSON 格式
@@ -753,27 +817,39 @@ shots 不含發球；serves 單獨計入
 
 僅保留回合勝負判斷功能（contact 驗證已停用）。
 
+**ThumbnailWriter**：在偵測主迴圈中非同步寫縮圖，`maybe_save()` 每 `THUMB_STRIDE` 幀儲存一張。
+
+**verify_rally_winner**：由 `FrameBuffer._flush_rally` 提交到 `ThreadPoolExecutor(max_workers=2)` 背景執行；`wait_vlm()` 等待所有 futures 並呼叫 `_fill_outcome()` 填結果。
+
 | 常數 | 值 | 說明 |
 |---|---|---|
 | `THUMB_STRIDE` | 5 | 偵測迴圈每幾幀存縮圖 |
 | `THUMB_W / THUMB_H` | 320 × 180 | 縮圖解析度 |
 | `WINNER_LOOK_AHEAD_FRAMES` | 240 | 勝負判斷最後一拍後看幾幀（~4s@60fps） |
 | `MAX_FRAMES_PER_WINNER` | 8 | 勝負判斷每次最多送幾張圖 |
-| `VLM_TIMEOUT` | 120s | VLLM 請求 timeout |
+| `VLM_TIMEOUT` | 120s（wait 上限 180s） | VLLM 請求 timeout |
 | `enable_thinking` | False | 關閉 Qwen3 chain-of-thought |
 
 #### 5.10.6 注意事項
 
-- **單一資料源原則**：所有位置（球/人/手腕）在偵測階段的滑動窗口中統一定案（過濾+插值），後續分析與彙整直接使用，不再重複處理
-- **滑動窗口設計**：WINDOW=30 幀延遲，每個位置只定案一次（`finalized_up_to` 追蹤），已定案的位置做為後續過濾的上下文但不被修改
-- **球軌跡過濾**：偵測階段 MAX_JUMP_RATIO=0.12 × 對角線丟棄；窗口階段迭代離群過濾（±6 鄰居，最多 3 pass）；繪製階段超過 280km/h 換算距離的相鄰點斷開不連線
+- **FPS 動態常數**：所有時序參數均以秒為單位定義（`WINDOW_SEC`, `MISS_RESET_SEC`, `STUCK_SEC_LIMIT`, `STATIC_BLACKLIST_TTL_SEC` 等），在各元件 `__init__` 時依 fps 轉換為幀數，確保不同幀率下行為一致
+- **單一資料源原則**：所有位置（球/人/手腕）在滑動窗口中統一定案後，畫面繪製與後續分析共用同一份資料，不重複過濾
+- **滑動窗口**：`WINDOW_SEC=1.0s`（幀數 = `max(1, int(1.0×fps))`）延遲，每個位置只定案一次（`finalized` list 追蹤），已定案的位置做為後續過濾上下文但不被修改
+- **延後繪製**：Pose 骨架在偵測時只存入 `FrameSlot.skel_data`，實際繪製在 `_draw_and_encode()` 時才進行，保證畫面和分析用同一份定案資料
+- **球重捕獲模式**：`last_center` 重置後進入 `REACQ_MAX_SEC=0.5s` 倒數，此期間用寬鬆閾值（`REACQ_JUMP_RATIO=0.25×對角線`）重新捕獲球，避免誤抓遠端假陽性
+- **球軌跡過濾**：偵測階段 `MAX_JUMP_RATIO=0.12×對角線` 丟棄；窗口階段迭代離群過濾（±6 鄰居，最多 3 pass）；繪製階段超過 280km/h 換算距離的相鄰點斷開不連線
 - **插值方向檢查**（僅球）：gap 前後 vy 反號 → 不插值，避免跨越觸地/擊球反轉產生假軌跡
-- **擊球延遲確認**：球在手腕範圍內時持續更新候選，離開後才記錄（取距離最小的幀），解決發球前拍球/持球反覆觸發
-- **同一球員冷卻**：`SAME_PLAYER_COOLDOWN=20`（0.33s@60fps），防止同一次揮拍的兩個距離局部最小值被判為兩次擊球
-- **回合感知暫存**：回合中的幀暫存於記憶體 list，回合結束（gap > RALLY_GAP_SEC 或切鏡）時 flush；flush 時跑 `detect_events` 取得精確擊球歸屬後才畫球軌跡顏色。非回合幀直接以半場位置決定顏色並寫出
-- **precomputed_events**：每次 flush 累計的 contacts/bounces 傳給 `run_analysis(precomputed_events=...)`，跳過全域重複 `detect_events`
-- **靜止黑名單**：`STATIC_BLACKLIST_RADIUS=25px`，`TTL=90 幀`，防場地線假陽性
-- **切鏡處理**：H 由有效→None 為過場幀，重置追蹤狀態 + 禁止跨切鏡插值 + 回合切割邊界
+- **擊球延遲確認**：球在手腕範圍內時持續更新候選，離開後才記錄（距離最小的幀），解決發球前拍球/持球反覆觸發
+- **同一球員冷卻**：`SAME_PLAYER_COOLDOWN_SEC`（約 0.33s），防止同一次揮拍被判為兩次擊球
+- **回合感知暫存**：回合中的幀暫存於記憶體（`_rally_slots`），回合結束（gap > `RALLY_GAP_SEC` 或切鏡）時 `_flush_rally()`；flush 時跑 `detect_events` 取得精確擊球歸屬後才畫球軌跡顏色；非回合幀依半場決定顏色並直接寫出
+- **rally 分割**：`_flush_rally()` 將 contacts 按 `RALLY_GAP_SEC × fps` 間距拆成多個獨立組；每組各自建回合 + 提交 VLM 背景任務，避免長時間空白被虛假偵測橋接成同一回合
+- **VLM 背景執行**：`ThreadPoolExecutor(max_workers=2)`，flush 時立即 submit；`wait_vlm()` 在 flush_remaining 之後集中等待，`timeout=180s`
+- **靜止黑名單**：`STATIC_BLACKLIST_RADIUS=25px`，`TTL=STATIC_BLACKLIST_TTL_SEC=3.0s×fps`，防場地線假陽性
+- **切鏡處理**：H 由有效→None 為過場幀，重置 BallTracker + 禁止跨切鏡插值 + 強制 flush 回合 buffer
+- **detect_events margin**：`ctx_s/ctx_e` 以 `max(WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC)×fps+1` 做 margin，確保分析窗口包含擊球前後足夠上下文
+- **發球過發球線驗證**：`SERVE_CROSS_SEC=3.0s` 窗口，球必須形成連續軌跡（`≥ max(2, 0.1×fps)` 個非 None 點）進入對方半場，才接受為有效發球；過濾拋球未擊中、球僮拾球等假陽性
+- **中線繪製**：`draw_court()` kps 模式下，中線兩端點皆由 H 矩陣從世界座標計算，不依賴 `kps[12]`（YOLO 常偵測不到）
+- **絕對時間日誌**：`detect_events` 接收 `frame_offset=ctx_s`，所有 `[ball]`/`[hit]`/`[bounce]`/`[hit-rejected]` 日誌輸出 `t=X.XXs` 絕對時間
 - **VLM contact 驗證**：已停用（VLM 幾乎總是回傳 HIT，不可靠）
 - **勝利球落點**：`winner_land` 優先使用最後一拍後對方半場的第一個 bounce；無 bounce 時退回第一個追蹤點
 
@@ -846,7 +922,7 @@ Context: { token, user, isAuthed, login(token), logout(), refresh() }
 使用 `useVideoPanelController` 提供的所有回調，自己只負責渲染：
 
 - 拖放 / 點擊上傳區（`<input type="file">`）
-- `<video>` 元素播放
+- `<video controls>` 元素播放：使用瀏覽器原生控制列，**不加自訂 onClick**（避免原生 controls 點擊事件冒泡後觸發自訂處理器導致暫停失效）
 - 狀態列文字 + 進度條
 - 按鈕：**綜合分析**（分析完成後變「顯示分析結果」）/ 下載分析影片 / 重置分析 / 重置影片
 - 影片 meta 資訊顯示（檔名、解析度、FPS、時長）

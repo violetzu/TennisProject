@@ -95,12 +95,11 @@ class BallTracker:
         write_idx: int,
         scene_cut_set: set,
         finalized: List[int],
-        extra_positions: List[List[Optional[Tuple[float, float]]]],
     ) -> None:
-        """滑動窗口處理：ball filter + interp + extra (player/wrist) interp。"""
+        """滑動窗口處理：ball filter + interp（僅球，不處理球員/手腕）。"""
         process_window(
             write_idx, self.max_trail_jump, scene_cut_set, finalized,
-            self.all_positions, extra_positions, fps=self._fps,
+            self.all_positions, [], fps=self._fps,
         )
 
     def detect(
@@ -460,6 +459,27 @@ def process_window(
                           scene_cut_set, extra_max_gap, check_direction=False)
 
     finalized_up_to[0] = write_idx
+
+
+def finalize_extras(
+    write_idx: int,
+    prev_final: int,
+    fps: float,
+    scene_cut_set: set,
+    extra_positions: List[List[Optional[Tuple[float, float]]]],
+    extra_max_gap: int = 15,
+) -> None:
+    """球員/手腕位置插值（與球的 finalize 分離，由 FrameBuffer 獨立呼叫）。
+
+    prev_final：呼叫 BallTracker.finalize() 之前的 finalized_up_to[0]，
+    確保插值起點與球的 finalize 一致。
+    """
+    win_frames = max(1, int(WINDOW_SEC * fps))
+    interp_start = max(0, prev_final + 1)
+    for pos_list in extra_positions:
+        end_ex = min(len(pos_list), write_idx + win_frames + 1)
+        _interpolate_gaps(pos_list, interp_start, write_idx, end_ex,
+                          scene_cut_set, extra_max_gap, check_direction=False)
 
 
 # ── 球軌跡繪製 ──────────────────────────────────────────────────────────────
