@@ -102,15 +102,12 @@ def compute_frame_speeds_world(
         p0, p1 = positions[i - 1], positions[i]
         if p0 is None or p1 is None:
             continue
-        try:
-            pts = np.array([[list(p0)], [list(p1)]], dtype=np.float32)
-            world = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
-            dist_m = float(np.linalg.norm(world[1] - world[0]))
-            kmh = round(dist_m * fps * 3.6, 1)
-            if MIN_BALL_SPEED_KMH <= kmh <= MAX_BALL_SPEED_KMH:
-                speeds[i] = kmh
-        except Exception:
-            pass
+        pts = np.array([[list(p0)], [list(p1)]], dtype=np.float32)
+        world = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
+        dist_m = float(np.linalg.norm(world[1] - world[0]))
+        kmh = round(dist_m * fps * 3.6, 1)
+        if MIN_BALL_SPEED_KMH <= kmh <= MAX_BALL_SPEED_KMH:
+            speeds[i] = kmh
     return speeds
 
 
@@ -129,6 +126,8 @@ def detect_events(
     fps: float,
     scene_cut_frames: List[int],
     frame_offset: int = 0,
+    bbox_height_top: Optional[List[Optional[float]]] = None,
+    bbox_height_bottom: Optional[List[Optional[float]]] = None,
 ) -> Tuple[List[int], List[int]]:
     """
     第一性原理事件偵測：球靠近手腕 = 擊球，軌跡反轉且遠離所有人 = 觸地。
@@ -221,7 +220,19 @@ def detect_events(
         return max_d
 
     def _swing_threshold(frame_idx: int, player: str) -> float:
-        """根據球員在畫面中的 y 位置縮放閾值（遠端球員小、近端球員大）。"""
+        """根據球員 bbox 高度縮放閾值（透視縮放：遠端 bbox 小 → 閾值低）。
+        當前幀 bbox 不可用時，向前後各搜尋 SW 幀取最近有效值；
+        完全找不到時 fallback 到 y 比例估算。"""
+        bh_list = bbox_height_top if player == "top" else bbox_height_bottom
+        bh = None
+        if bh_list is not None:
+            for j in range(max(0, frame_idx - SW), min(n, frame_idx + SW + 1)):
+                if j < len(bh_list) and bh_list[j] is not None:
+                    bh = bh_list[j]
+                    break
+        if bh is not None:
+            return bh * SWING_MIN_WRIST_RATIO
+        # fallback: y 比例
         pl = player_top if player == "top" else player_bottom
         pp = pl[frame_idx] if frame_idx < len(pl) else None
         scale = pp[1] / img_h if pp is not None else 0.5
@@ -305,8 +316,16 @@ def detect_events(
         wm = _wrist_move(pi, pp)
         thr = _swing_threshold(pi, pp)
         if wm < thr:
+            bh_list = bbox_height_top if pp == "top" else bbox_height_bottom
+            bh = None
+            if bh_list is not None:
+                for j in range(max(0, pi - SW), min(n, pi + SW + 1)):
+                    if j < len(bh_list) and bh_list[j] is not None:
+                        bh = bh_list[j]
+                        break
+            _bh_str = f" bbox_h={bh:.0f}" if bh is not None else " bbox_h=None"
             print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
-                  f"wrist_move={wm:.0f} < {thr:.0f}")
+                  f"wrist_move={wm:.0f} < {thr:.0f}{_bh_str}")
             return
         # 發球拋球偵測：豁免前向軌跡檢查
         serve_cross = max(1, int(SERVE_CROSS_SEC * fps))
@@ -352,20 +371,28 @@ def detect_events(
                 last_event_type = "contact"
                 last_event = pi
                 last_event_player = pp
+                _bp = pos[pi]
+                _bstr = f"({_bp[0]:.0f},{_bp[1]:.0f})" if _bp else "None"
                 print(f"  [hit-fast] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
-                      f"d_wrist={pd:.0f} (no fwd trail, ball crossed court)")
+                      f"ball={_bstr} d_wrist={pd:.0f} (no fwd trail, ball crossed court)")
                 return
+            _bp = pos[pi]
+            _bstr = f"({_bp[0]:.0f},{_bp[1]:.0f})" if _bp else "None"
             print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
-                  f"no trajectory after hit ({len(fwd_trail)} pts)")
+                  f"ball={_bstr} no trajectory after hit ({len(fwd_trail)} pts)")
             return
         # 條件 2：軌跡需有實際位移（過濾靜態假偵測如場地標記）
         total_disp = sum(
             math.hypot(fwd_trail[k][0] - fwd_trail[k - 1][0],
                        fwd_trail[k][1] - fwd_trail[k - 1][1])
             for k in range(1, len(fwd_trail)))
-        min_disp = img_h * 0.05
+        min_disp = img_h * 0.03
         if total_disp < min_disp:
+            _bp = pos[pi]
+            _bstr = f"({_bp[0]:.0f},{_bp[1]:.0f})" if _bp else "None"
+            _t0, _t1 = fwd_trail[0], fwd_trail[-1]
             print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                  f"ball={_bstr} trail=({_t0[0]:.0f},{_t0[1]:.0f})→({_t1[0]:.0f},{_t1[1]:.0f}) "
                   f"static detection after hit (disp={total_disp:.0f} < {min_disp:.0f})")
             return
         # 條件 3：軌跡需進入場地區域（過濾球僮回收球）
@@ -380,17 +407,27 @@ def detect_events(
                 last_event_type = "contact"
                 last_event = pi
                 last_event_player = pp
+                _bp = pos[pi]
+                _bstr = f"({_bp[0]:.0f},{_bp[1]:.0f})" if _bp else "None"
                 print(f"  [hit-fast] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
-                      f"d_wrist={pd:.0f} (fwd not in court, ball crossed court)")
+                      f"ball={_bstr} d_wrist={pd:.0f} (fwd not in court, ball crossed court)")
                 return
+            _bp = pos[pi]
+            _bstr = f"({_bp[0]:.0f},{_bp[1]:.0f})" if _bp else "None"
+            _t0, _t1 = fwd_trail[0], fwd_trail[-1]
             print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+                  f"ball={_bstr} trail=({_t0[0]:.0f},{_t0[1]:.0f})→({_t1[0]:.0f},{_t1[1]:.0f}) "
                   f"trajectory not in court (out-of-play)")
             return
         contacts.append(pi)
         last_event_type = "contact"
         last_event = pi
         last_event_player = pp
+        _bp = pos[pi]
+        _bstr = f"({_bp[0]:.0f},{_bp[1]:.0f})" if _bp else "None"
+        _t0, _t1 = fwd_trail[0], fwd_trail[-1]
         print(f"  [hit] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
+              f"ball={_bstr} trail=({_t0[0]:.0f},{_t0[1]:.0f})→({_t1[0]:.0f},{_t1[1]:.0f}) "
               f"d_wrist={pd:.0f} wrist_move={wm:.0f} thr={thr:.0f}")
 
     for i in range(W, n - W):
@@ -474,8 +511,10 @@ def detect_events(
             continue
 
         bounces.append(i)
+        _bpos = pos[i]
+        _bstr = f"({_bpos[0]:.0f},{_bpos[1]:.0f})" if _bpos else "None"
         print(f"  [bounce] f={i + frame_offset} t={(i + frame_offset)/fps:.2f}s "
-              f"d_nearest={f'{d:.0f}' if d is not None else 'inf'}")
+              f"ball={_bstr} d_nearest={f'{d:.0f}' if d is not None else 'inf'}")
 
     print(f"[detect_events] {len(contacts)} hits, {len(bounces)} bounces")
     return contacts, bounces

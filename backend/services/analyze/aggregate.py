@@ -215,6 +215,11 @@ def build_single_rally(
             shot["player_world"] = {"x": round(player_world[0], 2),
                                     "y": round(player_world[1], 2)}
         shots_out.append(shot)
+        _spd = f"{speed:.0f}km/h" if speed is not None else "—"
+        _bp = f"({ball_pos[0]:.0f},{ball_pos[1]:.0f})"
+        _wp = f"({ball_world[0]:.1f},{ball_world[1]:.1f})m" if ball_world else "—"
+        print(f"  [shot#{seq+1}] f={fi} t={fi/fps:.2f}s player={player} "
+              f"type={shot_type} ball={_bp} world={_wp} speed={_spd} zone={p_zone}")
 
     # ── bounces ──────────────────────────────────────────────────────────
     bounces_out: List[Dict] = []
@@ -352,78 +357,3 @@ def build_summary(
         },
     }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 向下相容（原有 build_rallies 介面）
-# ─────────────────────────────────────────────────────────────────────────────
-
-def build_rallies(
-    *,
-    rally_groups: List[List[int]],
-    bounces_f: List[int],
-    pos_interp: List[Optional[Tuple[float, float]]],
-    smooth_speeds: List[Optional[float]],
-    all_player_top: List[Optional[Tuple[float, float]]],
-    all_player_bottom: List[Optional[Tuple[float, float]]],
-    scene_cut_frames: List[int],
-    vlm_shot_types: Dict[int, str],
-    vlm_winner_results: Dict[int, str],
-    last_valid_H: Optional,
-    width: int,
-    height: int,
-    fps: float,
-    total_frames: int,
-) -> Dict:
-    """向下相容包裝：依序呼叫 build_single_rally + build_summary。"""
-
-    rally_results: List[Dict] = []
-    per_rally_stats: List[Dict] = []
-
-    for rally_idx, rally_contacts in enumerate(rally_groups):
-        if not rally_contacts:
-            continue
-        next_start = (rally_groups[rally_idx + 1][0]
-                      if rally_idx + 1 < len(rally_groups) else None)
-
-        rally_json, stats = build_single_rally(
-            rally_idx=rally_idx,
-            rally_contacts=rally_contacts,
-            bounces_f=bounces_f,
-            pos_interp=pos_interp,
-            smooth_speeds=smooth_speeds,
-            all_player_top=all_player_top,
-            all_player_bottom=all_player_bottom,
-            scene_cut_frames=scene_cut_frames,
-            vlm_shot_types=vlm_shot_types,
-            last_valid_H=last_valid_H,
-            width=width,
-            height=height,
-            fps=fps,
-            total_frames=total_frames,
-            next_rally_start=next_start,
-        )
-
-        # 填入 VLM 勝負結果
-        winner_player = vlm_winner_results.get(rally_idx)
-        if winner_player in ("top", "bottom"):
-            stats["player_stats"][winner_player]["winners"] += 1
-            rally_json["outcome"]["type"] = "winner"
-            rally_json["outcome"]["winner_player"] = winner_player
-            if last_valid_H is not None:
-                rally_json["outcome"]["winner_land"] = find_winner_landing(
-                    winner_player, rally_contacts, bounces_f, pos_interp,
-                    next_start, total_frames, last_valid_H, fps)
-        else:
-            cut_near = any(
-                rally_contacts[0] <= sc <= rally_contacts[-1] + int(fps * 3)
-                for sc in scene_cut_frames)
-            rally_json["outcome"]["type"] = "scene_cut" if cut_near else "unknown"
-            rally_json["outcome"]["winner_player"] = winner_player
-
-        rally_results.append(rally_json)
-        per_rally_stats.append(stats)
-
-    return {
-        **build_summary(rally_results, per_rally_stats),
-        "rallies": rally_results,
-    }

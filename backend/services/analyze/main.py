@@ -86,6 +86,11 @@ def analyze_combine(
     with open(log_path, "w", encoding="utf-8", buffering=1) as _log_file:
         set_log_file(_log_file)
         try:
+            _dur_hint = f"{total_frames/fps:.1f}s" if fps and total_frames else "?s"
+            print(f"[analyze] {vpath.name}  "
+                  f"{total_frames or '?'} frames  {_dur_hint}  "
+                  f"{fps:.2f}fps  {width}x{height}")
+
             with VideoPipe(vpath, out_video, width, height, fps) as pipe:
                 buf = FrameBuffer(
                     max(1, int(WINDOW_SEC * fps)), fps, width, height, pipe,
@@ -96,6 +101,7 @@ def analyze_combine(
                 for idx, frame in enumerate(pipe.frames()):
                     # 場地偵測
                     court.detect(frame, idx)
+                    ball.update_court_H(court.H)
 
                     if not court.is_valid:
                         if idx in court.scene_cut_set:
@@ -108,12 +114,12 @@ def analyze_combine(
                         continue
 
                     # Pose + Ball 推論
-                    top, bot, tw, bw, skel = pose.detect(
-                        frame, width, height, court.corners, court.net_y,
+                    top, bot, tw, bw, top_bh, bot_bh, skel = pose.detect(
+                        frame, height, court.corners, court.net_y, idx,
                     )
                     box = ball.detect(ball_model, frame, width, height, idx)
 
-                    positions.append(top, bot, tw, bw)
+                    positions.append(top, bot, tw, bw, top_bh, bot_bh)
                     ball.append_position(box)
 
                     # 縮圖（非同步寫入）
@@ -160,6 +166,8 @@ def analyze_combine(
 
             with out_json.open("w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
+            print(f"[analyze] output: {out_json.name}  {out_video.name}  "
+                  f"rallies={len(buf.rally_results)}")
 
             elapsed = time.perf_counter() - t0_total
             eff_fps = total_frames_actual / elapsed if elapsed > 0 else 0

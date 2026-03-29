@@ -34,8 +34,8 @@ def _to_video_url(raw_video_path: str) -> str:
     return f"{VIDEO_URL_DOMAIN}/videos/{rel}"
 
 
-def _iter_vllm_sse_raw(resp: requests.Response):
-    """Yields raw content deltas from vLLM SSE stream (no filtering)."""
+def _iter_vllm_sse_raw(resp: requests.Response, reasoning_buf: list):
+    """Yields content deltas; accumulates reasoning_content into reasoning_buf."""
     for line in resp.iter_lines(decode_unicode=True):
         if not line or not line.startswith("data: "):
             continue
@@ -43,9 +43,13 @@ def _iter_vllm_sse_raw(resp: requests.Response):
         if data == "[DONE]":
             break
         try:
-            delta = json.loads(data)["choices"][0]["delta"].get("content", "")
-            if delta:
-                yield delta
+            delta = json.loads(data)["choices"][0]["delta"]
+            rc = delta.get("reasoning_content", "")
+            if rc:
+                reasoning_buf.append(rc)
+            ct = delta.get("content", "")
+            if ct:
+                yield ct
         except Exception:
             continue
 
@@ -221,7 +225,8 @@ async def chat(
         headers["Authorization"] = f"Bearer {VLLM.api_key}"
 
     def token_generator():
-        output_chunks: list[str]      = []
+        output_chunks:  list[str]     = []
+        reasoning_buf:  list[str]     = []
         error_text:    Optional[str]  = None
 
         try:
@@ -241,7 +246,7 @@ async def chat(
             # delta.content 只含正式回答 token，不再有 <think> 標記。
             output_started = False
 
-            for raw in _iter_vllm_sse_raw(resp):
+            for raw in _iter_vllm_sse_raw(resp, reasoning_buf):
                 clean = raw.translate(str.maketrans("", "", REMOVE_CHARS))
                 if not output_started:
                     clean = clean.lstrip("\n")
@@ -249,6 +254,9 @@ async def chat(
                     output_started = True
                     output_chunks.append(clean)
                     yield clean
+
+            if reasoning_buf:
+                print(f"[think]\n{''.join(reasoning_buf)}\n[/think]")
 
         except Exception as e:
             error_text = f"[Error: {e}]"

@@ -35,16 +35,6 @@ _SYSTEM_PROMPT = (
 
 # ── 縮圖工具 ──────────────────────────────────────────────────────────────────
 
-def save_thumbnail(frame: np.ndarray, thumb_dir: Path, idx: int) -> None:
-    """在偵測迴圈中每 THUMB_STRIDE 幀呼叫一次，儲存原始幀縮圖。"""
-    small = cv2.resize(frame, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
-    cv2.imwrite(
-        str(thumb_dir / f"frame_{idx:06d}.jpg"),
-        small,
-        [cv2.IMWRITE_JPEG_QUALITY, 70],
-    )
-
-
 class ThumbnailWriter:
     """非同步縮圖寫入器。
 
@@ -201,7 +191,8 @@ def verify_rally_winner(
     )
     thumbs = select_rally_thumbs(thumb_dir, last_contact_f, end_f, MAX_FRAMES_PER_WINNER)
     if not thumbs:
-        print(f"[VLM-winner] f={last_contact_f}: no thumbnails in window, skip")
+        print(f"[VLM-winner] f={last_contact_f}: no thumbnails in window "
+              f"[f={last_contact_f}–{end_f}], skip")
         return "unknown"
 
     def _ft(p: Path) -> float:
@@ -230,6 +221,8 @@ def verify_rally_winner(
         "</outcome>"
     )
 
+    print(f"[VLM-winner] f={last_contact_f} t={last_t:.2f}s "
+          f"window=[f={last_contact_f}–{end_f}] {len(thumbs)} frames → calling VLM")
     try:
         content = _call_vlm(
             vllm_cfg,

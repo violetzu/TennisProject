@@ -19,7 +19,7 @@ import shutil
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Callable, Deque, Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -57,18 +57,24 @@ class PositionStore:
     player_bottom: List[Optional[Tuple[float, float]]] = field(default_factory=list)
     wrist_top: List[Optional[Tuple[float, float]]] = field(default_factory=list)
     wrist_bottom: List[Optional[Tuple[float, float]]] = field(default_factory=list)
+    bbox_height_top: List[Optional[float]] = field(default_factory=list)
+    bbox_height_bottom: List[Optional[float]] = field(default_factory=list)
     ball_owner: List[Optional[str]] = field(default_factory=list)
 
-    def append(self, top, bot, tw, bw) -> None:
+    def append(self, top, bot, tw, bw, top_bh=None, bot_bh=None) -> None:
         self.player_top.append(top)
         self.player_bottom.append(bot)
         self.wrist_top.append(tw)
         self.wrist_bottom.append(bw)
+        self.bbox_height_top.append(top_bh)
+        self.bbox_height_bottom.append(bot_bh)
         self.ball_owner.append(None)
 
     def append_none(self) -> None:
         for lst in (self.player_top, self.player_bottom,
-                    self.wrist_top, self.wrist_bottom, self.ball_owner):
+                    self.wrist_top, self.wrist_bottom,
+                    self.bbox_height_top, self.bbox_height_bottom,
+                    self.ball_owner):
             lst.append(None)
 
 
@@ -152,6 +158,8 @@ class FrameBuffer:
 
     def wait_vlm(self) -> None:
         """等待所有背景 VLM future 完成，將結果填入 rally outcome。"""
+        if self._vlm_futures:
+            print(f"[VLM] waiting for {len(self._vlm_futures)} result(s)...")
         for rally_local_idx, future in self._vlm_futures:
             try:
                 winner = future.result(timeout=180)
@@ -195,6 +203,8 @@ class FrameBuffer:
 
         # 場景切換 → 強制 flush
         if widx in self._court.scene_cut_set and self._rally_start >= 0:
+            print(f"[rally-cut] f={widx} t={widx/self._fps:.2f}s "
+                  f"scene cut → flush (f={self._rally_start}–{self._rally_start + len(self._rally_slots) - 1})")
             self._flush_rally()
 
         in_rally = (widx - self._last_prox_widx) < self._gap_frames
@@ -204,6 +214,7 @@ class FrameBuffer:
             if self._rally_start < 0:
                 self._rally_start = widx
                 self._rally_slots = []
+                print(f"[rally-start] f={widx} t={widx/self._fps:.2f}s")
             self._rally_slots.append(slot)
         else:
             # 非回合 → flush pending rally，然後直接輸出
@@ -266,6 +277,8 @@ class FrameBuffer:
             self._pos.player_bottom[ctx_s:ctx_e + 1],
             self._width, self._height, self._fps, seg_cuts,
             frame_offset=ctx_s,
+            bbox_height_top=self._pos.bbox_height_top[ctx_s:ctx_e + 1],
+            bbox_height_bottom=self._pos.bbox_height_bottom[ctx_s:ctx_e + 1],
         )
 
         # 轉絕對索引，只保留 segment 內的
@@ -289,9 +302,13 @@ class FrameBuffer:
 
         # ── 3. 畫全部 + encode ────────────────────────────────────────────
         frame_bytes = len(self._rally_slots) * self._width * self._height * 3
-        print(f"[rally-buf] flushed {len(self._rally_slots)} frames "
-              f"(f={seg_s}–{seg_e}), {len(abs_contacts)} contacts, "
-              f"total {frame_bytes/1024/1024:.1f} MB")
+        print(f"[rally-end] f={seg_s}–{seg_e} t={seg_s/self._fps:.2f}s–{seg_e/self._fps:.2f}s "
+              f"{len(self._rally_slots)} frames  {len(abs_contacts)} hits  "
+              f"{len(abs_bounces)} bounces  {frame_bytes/1024/1024:.1f}MB")
+        _owner_sample = [(fi, self._pos.ball_owner[fi])
+                         for fi in abs_contacts
+                         if fi < len(self._pos.ball_owner)]
+        print(f"  [ball_owner] contacts: {_owner_sample}")
 
         for k, slot in enumerate(self._rally_slots):
             widx_k = seg_s + k
@@ -320,6 +337,9 @@ class FrameBuffer:
                 else:
                     contact_groups[-1].append(abs_contacts[ci])
 
+            if len(contact_groups) > 1:
+                print(f"[rally-split] {len(abs_contacts)} hits → {len(contact_groups)} rallies")
+
             for gi, group_contacts in enumerate(contact_groups):
                 # 篩選該 group 範圍內的 bounces
                 g_start = group_contacts[0]
@@ -336,6 +356,9 @@ class FrameBuffer:
                 next_start = (contact_groups[gi + 1][0]
                               if gi + 1 < len(contact_groups) else None)
 
+                print(f"[rally#{rally_idx+1}] f={group_contacts[0]}–{group_contacts[-1]} "
+                      f"t={group_contacts[0]/self._fps:.2f}s–{group_contacts[-1]/self._fps:.2f}s "
+                      f"{len(group_contacts)} shots  {len(group_bounces)} bounces")
                 rally_json, stats = build_single_rally(
                     rally_idx=rally_idx,
                     rally_contacts=group_contacts,

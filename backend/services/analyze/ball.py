@@ -59,6 +59,12 @@ class BallTracker:
         self._reacq_max_frames = max(1, int(REACQ_MAX_SEC * fps))
         self._stuck_frames_limit = max(1, int(STUCK_SEC_LIMIT * fps))
         self._blacklist_ttl = max(1, int(STATIC_BLACKLIST_TTL_SEC * fps))
+        # 場地 Homography（用於場地標記過濾）
+        self._court_H = None
+
+    def update_court_H(self, H) -> None:
+        """由主迴圈在每幀 court.detect() 後呼叫，更新 H（無效場地時傳 None）。"""
+        self._court_H = H
 
     def reset(self) -> None:
         self.last_center = None
@@ -181,10 +187,25 @@ class BallTracker:
                     self._pre_reset_center = None
                 return None
 
+        # 場地標記過濾（發球中線）
+        # 落在中線附近的偵測點直接丟棄，不計入 miss_count，
+        # 讓追蹤器保持目前 last_center，空幀之後由插值補回。
+        if self._court_H is not None:
+            from .court import is_on_service_center_line
+            pre = len(cands)
+            cands = [(b, c, g) for b, c, g in cands
+                     if not is_on_service_center_line(g, self._court_H)]
+            n_mark = pre - len(cands)
+            if n_mark:
+                print(f"  [ball-mark] f={frame_idx} t={frame_idx/self._fps:.2f}s "
+                      f"{n_mark} cand(s) on service center line → rejected")
+            if not cands:
+                return None  # 保留 last_center / miss_count，不影響追蹤狀態
+
         self.miss_count = 0
         self._pre_reset_center = None
         self._reacq_countdown = 0
-        chosen_box, _, (cbx, cby) = max(cands, key=lambda c: c[1])
+        chosen_box, chosen_conf, (cbx, cby) = max(cands, key=lambda c: c[1])
 
         # stuck 偵測
         if (
@@ -210,8 +231,12 @@ class BallTracker:
             return None
 
         if self.stuck_count > 0:
+            print(f"  [ball-sticky] f={frame_idx} t={frame_idx/self._fps:.2f}s "
+                  f"({cbx:.0f},{cby:.0f}) stuck={self.stuck_count}/{self._stuck_frames_limit} → discarded")
             return None
 
+        print(f"  [ball-det] f={frame_idx} t={frame_idx/self._fps:.2f}s "
+              f"→ ({cbx:.0f},{cby:.0f}) conf={chosen_conf:.2f}")
         return chosen_box
 
 
@@ -445,6 +470,10 @@ def process_window(
     for i, val in enumerate(cleaned):
         abs_i = start + i
         if abs_i > prev_final and abs_i <= write_idx:
+            if ball_positions[abs_i] is not None and val is None:
+                old = ball_positions[abs_i]
+                print(f"  [ball-rm] f={abs_i} t={abs_i/fps:.2f}s "
+                      f"({old[0]:.0f},{old[1]:.0f}) removed by outlier filter")
             ball_positions[abs_i] = val
 
     interp_start = max(0, prev_final + 1)
