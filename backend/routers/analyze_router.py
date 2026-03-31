@@ -18,7 +18,7 @@ from database import SessionLocal, get_db
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import assert_under_data_dir, build_session_snapshot, get_session_or_404, make_session_payload
 
-from services.analyze.main import analyze_combine
+from services.analyze.main import analyze
 
 router = APIRouter(prefix="/api", tags=["analyze"])
 
@@ -90,8 +90,8 @@ def reanalyze(
     return {"ok": True, "session_id": sid, "analysis_record_id": rec.id}
 
 
-@router.post("/analyze_combine")
-async def analyze_combine_api(
+@router.post("/analyze")
+async def analyze_api(
     req: AnalyzeRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -148,7 +148,7 @@ async def analyze_combine_api(
     async def runner():
         try:
             json_path, video_path = await asyncio.to_thread(
-                analyze_combine,
+                analyze,
                 str(vpath),
                 progress_cb,
                 request.app.state.yolo_ball_model,

@@ -218,7 +218,7 @@ export function useVideoPanelController({
     setLocalBusy(true);
     setAnalysisStarting(true);
     try {
-      const data = await apiFetchJson<{ ok: boolean; error?: string }>("/api/analyze_combine", {
+      const data = await apiFetchJson<{ ok: boolean; error?: string }>("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),

@@ -33,7 +33,7 @@ from config import VLLM
 
 
 
-def analyze_combine(
+def analyze(
     video_path: str,
     progress_cb: Optional[Callable[[int, int], None]],
     ball_model,
