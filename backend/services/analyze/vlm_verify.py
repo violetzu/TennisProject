@@ -63,23 +63,19 @@ class ThumbnailWriter:
         frame: np.ndarray,
         idx: int,
         court_draw_data,
-        skel_data,
+        top,
+        bot,
         ball_positions,
         max_trail_jump: float,
     ) -> None:
         """每 stride 幀存一張縮圖。非阻塞（除非 queue 滿）。"""
         if idx % self.stride != 0:
             return
-        from .court import draw_court
-        from .player import draw_skeleton_from_data
-        from .ball import draw_ball_trail
+        from .draw import draw_annotations
 
         thumb = frame.copy()
-        if court_draw_data is not None:
-            draw_court(thumb, court_draw_data[0],
-                       H=court_draw_data[1], kps=court_draw_data[2])
-        draw_skeleton_from_data(thumb, skel_data)
-        draw_ball_trail(thumb, idx, ball_positions, max_trail_jump, fps=self._fps)
+        draw_annotations(thumb, court_draw_data, top, bot,
+                         idx, ball_positions, max_trail_jump, fps=self._fps)
         small = cv2.resize(thumb, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
         self._queue.put((small, self.thumb_dir / f"frame_{idx:06d}.jpg"))
 

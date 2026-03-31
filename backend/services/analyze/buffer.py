@@ -23,14 +23,17 @@ from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .ball import BallTracker, WINDOW_SEC, draw_ball_trail, finalize_extras
-from .court import CourtDetector, draw_court
-from .player import draw_skeleton_from_data
+from .ball import BallTracker, finalize_extras
+from .constants import (
+    WINDOW_SEC, WRIST_HIT_RADIUS, RALLY_GAP_SEC,
+    WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC,
+)
+from .court import CourtDetector
+from .draw import draw_annotations
+from .player import PlayerDetection
 from .analysis import (
     detect_events, assign_court_side,
     compute_frame_speeds_world, smooth, find_winner_landing,
-    WRIST_HIT_RADIUS, RALLY_GAP_SEC,
-    WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC,
 )
 from .aggregate import build_single_rally, build_summary
 from .vlm_verify import verify_rally_winner
@@ -46,7 +49,8 @@ class FrameSlot:
     """一幀的 raw pixels + 偵測 metadata。"""
     frame: np.ndarray
     court_valid: bool
-    skel_data: List[Tuple[list, str]]
+    top: Optional["PlayerDetection"]
+    bot: Optional["PlayerDetection"]
     court_draw_data: Optional[Tuple]
 
 
@@ -246,7 +250,10 @@ class FrameBuffer:
         if bp is None:
             return (self._pos.ball_owner[widx - 1]
                     if widx > 0 and widx - 1 < len(self._pos.ball_owner) else None)
-        return "bottom" if bp[1] > self._height * 0.5 else "top"
+        return assign_court_side(
+            widx, self._ball.all_positions,
+            self._pos.player_top, self._pos.player_bottom,
+            self._court.last_valid_H, self._height)
 
     # ── internal: rally flush (核心) ──────────────────────────────────────────
 
@@ -269,7 +276,7 @@ class FrameBuffer:
 
         seg_cuts = [sc - ctx_s for sc in self._court.scene_cuts
                     if ctx_s <= sc <= ctx_e]
-        contacts, bounces = detect_events(
+        contacts, contact_players, bounces = detect_events(
             self._ball.all_positions[ctx_s:ctx_e + 1],
             self._pos.wrist_top[ctx_s:ctx_e + 1],
             self._pos.wrist_bottom[ctx_s:ctx_e + 1],
@@ -282,17 +289,19 @@ class FrameBuffer:
         )
 
         # 轉絕對索引，只保留 segment 內的
-        abs_contacts = sorted(
-            c + ctx_s for c in contacts if seg_s <= c + ctx_s <= seg_e)
+        # 同時保留對應的 player
+        _filtered = [(c + ctx_s, p) for c, p in zip(contacts, contact_players)
+                     if seg_s <= c + ctx_s <= seg_e]
+        _filtered.sort(key=lambda x: x[0])
+        abs_contacts = [f for f, _ in _filtered]
+        abs_contact_players = [p for _, p in _filtered]
         abs_bounces = sorted(
             b + ctx_s for b in bounces if seg_s <= b + ctx_s <= seg_e)
 
         # ── 2. assign ball_owner ──────────────────────────────────────────
-        for c in abs_contacts:
-            self._pos.ball_owner[c] = assign_court_side(
-                c, self._ball.all_positions,
-                self._pos.player_top, self._pos.player_bottom,
-                self._court.last_valid_H, self._height)
+        # contact 幀直接用 hit detection 判定的 player（比 assign_court_side 更準確）
+        for c, player in zip(abs_contacts, abs_contact_players):
+            self._pos.ball_owner[c] = player
 
         # forward-fill
         for fi in range(seg_s, seg_e + 1):
@@ -305,14 +314,13 @@ class FrameBuffer:
         print(f"[rally-end] f={seg_s}–{seg_e} t={seg_s/self._fps:.2f}s–{seg_e/self._fps:.2f}s "
               f"{len(self._rally_slots)} frames  {len(abs_contacts)} hits  "
               f"{len(abs_bounces)} bounces  {frame_bytes/1024/1024:.1f}MB")
-        _owner_sample = [(fi, self._pos.ball_owner[fi])
-                         for fi in abs_contacts
-                         if fi < len(self._pos.ball_owner)]
+        _owner_sample = [(fi, p) for fi, p in zip(abs_contacts, abs_contact_players)]
         print(f"  [ball_owner] contacts: {_owner_sample}")
 
+        contact_segments = list(zip(abs_contacts, abs_contact_players))
         for k, slot in enumerate(self._rally_slots):
             widx_k = seg_s + k
-            self._draw_and_encode(slot, widx_k)
+            self._draw_and_encode(slot, widx_k, contact_segments=contact_segments)
 
         # ── 4. 球速計算（僅計算回合段，避免全片重掃）──────────────────
         H = self._court.last_valid_H
@@ -408,25 +416,18 @@ class FrameBuffer:
 
     # ── internal: draw + encode ───────────────────────────────────────────────
 
-    def _draw_and_encode(self, slot: FrameSlot, widx: int) -> None:
+    def _draw_and_encode(
+        self, slot: FrameSlot, widx: int,
+        contact_segments=None,
+    ) -> None:
         """統一繪製 court + skeleton + ball trail → write to encoder。"""
-        frame = slot.frame
-
-        # court lines
-        if slot.court_draw_data is not None:
-            draw_court(frame, slot.court_draw_data[0],
-                       H=slot.court_draw_data[1], kps=slot.court_draw_data[2])
-
-        # skeleton
-        draw_skeleton_from_data(frame, slot.skel_data)
-
-        # ball trail
-        if slot.court_valid:
-            draw_ball_trail(frame, widx, self._ball.all_positions,
-                            self._ball.max_trail_jump, self._pos.ball_owner,
-                            fps=self._fps)
-
-        self._pipe.write(frame)
+        draw_annotations(
+            slot.frame, slot.court_draw_data, slot.top, slot.bot,
+            widx, self._ball.all_positions, self._ball.max_trail_jump,
+            self._pos.ball_owner, fps=self._fps,
+            contact_segments=contact_segments, court_valid=slot.court_valid,
+        )
+        self._pipe.write(slot.frame)
 
     # ── internal: VLM outcome fill ────────────────────────────────────────────
 

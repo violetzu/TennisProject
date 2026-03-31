@@ -2,19 +2,21 @@
 球員偵測 (Player Detection)
 
 對外 API：
-  - PoseDetector.detect()   Pose 偵測 + 球員歸屬，回傳位置/手腕/骨架資料
-  - draw_skeleton_from_data() 依骨架資料在幀上繪製關節與連線
+  - PlayerDetection             單一球員偵測結果（pos, bbox_h, kps）
+  - PoseDetector.detect()       Pose 偵測，回傳 (top, bot): Optional[PlayerDetection]
+  - PoseDetector.reset()        場景切換時重置追蹤狀態
+  - draw_skeleton_from_data()   繪製骨架，輸入 [(kps, side), ...]
 
-篩選策略（有場地幾何時）：
-  - 面積 / 頂部裁切：bbox area >= 150，腳底 y2 >= img_h * 5%
-  - 關鍵點數量：信心度 >= 0.3 的關鍵點至少 4 個
-  - 左右邊線：球員中心 x 必須在場地左右邊線之間（含 15px 容差）
-  - 上下判斷：以球員腳底（y2）對比球網 y；腳底在網上方 → 上半場球員
+篩選策略：
+  - 偵測前遮罩：YOLO 推論前蓋黑場外區域（左右各擴一個球道寬，上下延伸至畫面邊緣）
+  - 偵測後邊線篩選：球員中心 x 必須在場地左右邊線之間（含 img_h * 0.015 容差）
+  - 追蹤選取：有前幀 → 取位移最小；無前幀 → 取最大面積
 """
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -29,12 +31,28 @@ SKELETON_LINKS = [
     [11, 13], [13, 15], [12, 14], [14, 16],
 ]
 
+@dataclass
+class PlayerDetection:
+    """單一球員偵測結果。"""
+    pos: Tuple[float, float]   # 中心 (cx, cy)
+    bbox_h: float              # bbox 高度（像素）
+    kps: list                  # 17 個 COCO 關鍵點 [(x, y, conf), ...]
+
+    @property
+    def wrist(self) -> Optional[Tuple[float, float]]:
+        """左右手腕中信心度較高者；都低於 0.3 則回傳 None。"""
+        lw, rw = self.kps[9], self.kps[10]  # COCO: 9=left wrist, 10=right wrist
+        best = lw if lw[2] >= rw[2] else rw
+        return (best[0], best[1]) if best[2] >= 0.3 else None
+
 
 class PoseDetector:
     """封裝姿態偵測模型，提供 detect() 單一入口。"""
 
     def __init__(self, model):
         self.model = model
+        self._prev_top: Optional[Tuple[float, float]] = None
+        self._prev_bot: Optional[Tuple[float, float]] = None
 
     def detect(
         self,
@@ -43,105 +61,64 @@ class PoseDetector:
         court_corners: Optional[np.ndarray] = None,
         net_y: Optional[float] = None,
         frame_idx: int = -1,
-    ) -> Tuple[
-        Optional[Tuple[float, float]],   # top_pos
-        Optional[Tuple[float, float]],   # bot_pos
-        Optional[Tuple[float, float]],   # top_wrist
-        Optional[Tuple[float, float]],   # bot_wrist
-        Optional[float],                 # top_bbox_h
-        Optional[float],                 # bot_bbox_h
-        List[Tuple[list, str]],          # skeleton_data  [(kps, 'top'|'bottom'), ...]
-    ]:
-        """Pose 偵測 + 球員歸屬。不畫圖，回傳骨架資料供延後繪製。"""
+    ) -> Tuple[Optional[PlayerDetection], Optional[PlayerDetection]]:
+        """Pose 偵測 + 球員歸屬。回傳 (top, bot)，每個是 PlayerDetection 或 None。"""
         results = self.model.predict(source=frame, imgsz=1280, conf=0.01, verbose=False, half=True)
         pose_r = results[0] if results else None
         if pose_r is None or getattr(pose_r, "keypoints", None) is None:
-            return None, None, None, None, None, None, []
+            return None, None
 
-        kps_list = pose_r.keypoints.data.cpu().tolist()
-        bx_list  = pose_r.boxes.xyxy.cpu().tolist()
-        # 以球網 y 為分界；無場地資訊時用畫面中線
-        split_y  = net_y if net_y is not None else img_h * 0.50
+        kps_list  = pose_r.keypoints.data.cpu().tolist()
+        bx_list   = pose_r.boxes.xyxy.cpu().tolist()
+        conf_list = pose_r.boxes.conf.cpu().tolist()
+        split_y   = net_y if net_y is not None else img_h * 0.50
 
-        upper: list = []   # 上半場候選（腳底在 split_y 以上）
-        lower: list = []   # 下半場候選
-        skel_data: List[Tuple[list, str]] = []
+        upper: list = []
+        lower: list = []
 
-        for box, kp in zip(bx_list, kps_list):
+        for box, kp, conf in zip(bx_list, kps_list, conf_list):
             x1, y1, x2, y2 = box[:4]
-            if not self._passes_filter(x1, y1, x2, y2, kp, img_h, court_corners, frame_idx):
-                continue
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+            bh = y2 - y1
 
-            cx   = (x1 + x2) / 2.0
-            cy   = (y1 + y2) / 2.0
-            bh   = y2 - y1
+            # 邊線篩選：球員中心 x 必須在場地左右邊線之間（含 img_h * 0.015 容差 1080p 約15px）
+            if court_corners is not None:
+                left_x, right_x = court_side_x_at_y(court_corners, y2)
+                offset = img_h * 0.015
+                if not (left_x - offset) <= cx <= (right_x + offset):
+                    # print(f"  [pose] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) conf={conf:.3f} "
+                    #       f"cx={cx:.0f} not in [{left_x-offset:.0f}, {right_x+offset:.0f}] → outside court")
+                    continue
 
-            # 取左右手腕中信心度較高的那個（_extract_wrists inline）
-            lw, rw = kp[9], kp[10]   # COCO index: 9=left wrist, 10=right wrist
-            best  = lw if lw[2] >= rw[2] else rw
-            wrist = (best[0], best[1]) if best[2] >= 0.3 else None
+            print(f"  [pose] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) conf={conf:.3f}")
 
-            side  = "top" if y2 < split_y else "bottom"
-            entry = {"cx": cx, "cy": cy, "bh": bh, "area": (x2 - x1) * bh, "wrist": wrist}
-            (upper if side == "top" else lower).append(entry)
-            skel_data.append((kp, side))
+            (upper if y2 < split_y else lower).append(
+                ((x2 - x1) * bh, PlayerDetection(pos=(cx, cy), bbox_h=bh, kps=kp))
+            )
 
-        # 每側各取面積最大的候選（最可能是主角球員）
-        _top = max(upper, key=lambda c: c["area"]) if upper else None
-        _bot = max(lower, key=lambda c: c["area"]) if lower else None
+        # 取最大面積
+        def _best(candidates) -> Optional[PlayerDetection]:
+            return max(candidates, key=lambda c: c[0])[1] if candidates else None
 
-        top    = (_top["cx"], _top["cy"]) if _top else None
-        bot    = (_bot["cx"], _bot["cy"]) if _bot else None
-        top_w  = _top["wrist"] if _top else None
-        bot_w  = _bot["wrist"] if _bot else None
-        top_bh = _top["bh"] if _top else None
-        bot_bh = _bot["bh"] if _bot else None
-
-        return top, bot, top_w, bot_w, top_bh, bot_bh, skel_data
-
-    def _passes_filter(
-        self,
-        x1: float, y1: float, x2: float, y2: float,
-        kp: list,
-        img_h: int,
-        court_corners: Optional[np.ndarray],
-        frame_idx: int = -1,
-    ) -> bool:
-        """候選人過濾：面積、頂部裁切、關鍵點數量、左右邊線。"""
-        area = (x2 - x1) * (y2 - y1)
-        if area < 150 or y2 < img_h * 0.05:
-            if area >= 100:  # 只 log 接近邊界的
-                print(f"  [pose-filter] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) "
-                      f"area={area:.0f} y2={y2:.0f} → area<150 or y2<5%")
-            return False
-
-        kp_ok = sum(1 for (_, _, c) in kp if c >= 0.3)
-        if kp_ok < 4:
-            print(f"  [pose-filter] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) "
-                  f"area={area:.0f} kp_ok={kp_ok} → kp<4")
-            return False
-
-        # 場地邊線篩選
-        cx = (x1 + x2) / 2.0
-        if court_corners is not None:
-            left_x, right_x = court_side_x_at_y(court_corners, y2)
-            if not (left_x - 15.0) <= cx <= (right_x + 15.0):
-                print(f"  [pose-filter] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) "
-                      f"cx={cx:.0f} y2={y2:.0f} → outside court")
-                return False
-
-        return True
+        return _best(upper), _best(lower)
 
 
-def draw_skeleton_from_data(frame: np.ndarray, skel_data: List[Tuple[list, str]]) -> None:
-    """依骨架資料繪製關節與連線，上方球員綠色、下方球員黃色（就地修改）。"""
-    for kps, side in skel_data:
-        color = COLOR_TOP if side == "top" else COLOR_BOTTOM
+def draw_skeleton_from_data(
+    frame: np.ndarray,
+    top: Optional["PlayerDetection"],
+    bot: Optional["PlayerDetection"],
+) -> None:
+    """依球員偵測結果繪製關節與連線，上方球員綠色、下方球員黃色。"""
+    for player, color in ((top, COLOR_TOP), (bot, COLOR_BOTTOM)):
+        if player is None:
+            continue
+        kps = player.kps
         for (x, y, conf) in kps:
-            if conf >= 0.3:
+            if conf >= 0.1:
                 cv2.circle(frame, (int(x), int(y)), 4, color, -1)
         for i, j in SKELETON_LINKS:
-            if kps[i][2] >= 0.3 and kps[j][2] >= 0.3:
+            if kps[i][2] >= 0.1 and kps[j][2] >= 0.1:
                 cv2.line(frame,
                          (int(kps[i][0]), int(kps[i][1])),
                          (int(kps[j][0]), int(kps[j][1])),

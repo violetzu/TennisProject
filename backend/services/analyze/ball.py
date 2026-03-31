@@ -18,6 +18,8 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
+from .constants import WINDOW_SEC  # 跨模組共用，定義於 constants.py
+
 
 # ── 跳躍距離限制 ─────────────────────────────────────────────────────────────────
 MAX_JUMP_RATIO = 0.12           # 單幀最大跳躍距離占畫面對角線比例（超過直接丟棄）
@@ -34,7 +36,10 @@ STATIC_BLACKLIST_RADIUS = 25.0  # 黑名單影響半徑（像素）
 STATIC_BLACKLIST_TTL_SEC = 3.0  # 黑名單存活秒數
 
 # ── 滑動窗口延遲（需 ≥ max_gap 確保插值 + 過濾穩定後才寫出）───────────────
-WINDOW_SEC = 1.0                # 滑動窗口秒數
+# WINDOW_SEC → 已移至 constants.py，由頂部 import
+
+# ── 場地中線標記過濾 ────────────────────────────────────────────────────────
+CENTER_LINE_RADIUS_RATIO = 0.015  # 中線排除半徑佔畫面對角線比例
 
 
 class BallTracker:
@@ -59,12 +64,15 @@ class BallTracker:
         self._reacq_max_frames = max(1, int(REACQ_MAX_SEC * fps))
         self._stuck_frames_limit = max(1, int(STUCK_SEC_LIMIT * fps))
         self._blacklist_ttl = max(1, int(STATIC_BLACKLIST_TTL_SEC * fps))
-        # 場地 Homography（用於場地標記過濾）
-        self._court_H = None
+        # 場地中線像素端點（用於場地標記過濾）
+        self._court_center_line = None
+        self._center_line_radius: float = (
+            math.hypot(width, height) * CENTER_LINE_RADIUS_RATIO if width > 0 else 20.0
+        )
 
-    def update_court_H(self, H) -> None:
-        """由主迴圈在每幀 court.detect() 後呼叫，更新 H（無效場地時傳 None）。"""
-        self._court_H = H
+    def update_court(self, center_line) -> None:
+        """由主迴圈在每幀 court.detect() 後呼叫，更新中線端點（無效場地時傳 None）。"""
+        self._court_center_line = center_line
 
     def reset(self) -> None:
         self.last_center = None
@@ -187,14 +195,18 @@ class BallTracker:
                     self._pre_reset_center = None
                 return None
 
-        # 場地標記過濾（發球中線）
-        # 落在中線附近的偵測點直接丟棄，不計入 miss_count，
+        # 場地標記過濾，落在中線附近的偵測點直接丟棄，不計入 miss_count
         # 讓追蹤器保持目前 last_center，空幀之後由插值補回。
-        if self._court_H is not None:
-            from .court import is_on_service_center_line
+        if self._court_center_line is not None:
+            (x1, y1), (x2, y2) = self._court_center_line
+            dx, dy = x2 - x1, y2 - y1
+            seg_len2 = dx * dx + dy * dy
+            r = self._center_line_radius
             pre = len(cands)
-            cands = [(b, c, g) for b, c, g in cands
-                     if not is_on_service_center_line(g, self._court_H)]
+            def _keep(g):
+                t = max(0.0, min(1.0, ((g[0]-x1)*dx + (g[1]-y1)*dy) / seg_len2)) if seg_len2 else 0.0
+                return math.hypot(g[0]-(x1+t*dx), g[1]-(y1+t*dy)) >= r
+            cands = [(b, c, g) for b, c, g in cands if _keep(g)]
             n_mark = pre - len(cands)
             if n_mark:
                 print(f"  [ball-mark] f={frame_idx} t={frame_idx/self._fps:.2f}s "
@@ -513,43 +525,22 @@ def finalize_extras(
 
 # ── 球軌跡繪製 ──────────────────────────────────────────────────────────────
 
-OWNER_LOOKUP_SEC = 0.5  # 轉換前 owner 回查秒數
+def _seg_owner(fi: int, contact_segments: List[Tuple[int, str]]) -> str:
+    """根據 contact_segments 查 fi 所屬擊球段的 player。"""
+    owner = contact_segments[0][1] if contact_segments else "top"
+    for cf, cp in contact_segments:
+        if cf <= fi:
+            owner = cp
+        else:
+            break
+    return owner
 
-def _owner_color(
-    fi: int,
-    all_ball_owner: List[Optional[str]],
-    transitions: List[int],
-    fps: float = 30.0,
-) -> Tuple[int, int, int]:
-    """取得 frame fi 的軌跡顏色，轉換處漸變。"""
-    owner = all_ball_owner[fi] if fi < len(all_ball_owner) else None
-    base = _COLOR_TOP if owner == "top" else _COLOR_BOTTOM
-    owner_lookup = max(1, int(OWNER_LOOKUP_SEC * fps))
-    grad_half = max(1, int(_GRADIENT_HALF_SEC * fps))
 
-    for tf in transitions:
-        d = fi - tf
-        if d < -grad_half or d > grad_half:
-            continue
-        # 找轉換前 owner
-        old_o = None
-        for j in range(tf - 1, max(tf - owner_lookup, -1), -1):
-            if 0 <= j < len(all_ball_owner) and all_ball_owner[j]:
-                old_o = all_ball_owner[j]
-                break
-        new_o = all_ball_owner[tf] if tf < len(all_ball_owner) else None
-        if old_o and new_o and old_o != new_o:
-            old_c = _COLOR_TOP if old_o == "top" else _COLOR_BOTTOM
-            new_c = _COLOR_TOP if new_o == "top" else _COLOR_BOTTOM
-            t = max(0.0, min(1.0, (d + grad_half) / (2 * grad_half)))
-            return (
-                int(old_c[0] + (new_c[0] - old_c[0]) * t),
-                int(old_c[1] + (new_c[1] - old_c[1]) * t),
-                int(old_c[2] + (new_c[2] - old_c[2]) * t),
-            )
-        break
-
-    return base
+def _blend(c1: Tuple[int, int, int], c2: Tuple[int, int, int],
+           t: float) -> Tuple[int, int, int]:
+    return (int(c1[0] + (c2[0] - c1[0]) * t),
+            int(c1[1] + (c2[1] - c1[1]) * t),
+            int(c1[2] + (c2[2] - c1[2]) * t))
 
 
 def draw_ball_trail(
@@ -559,9 +550,11 @@ def draw_ball_trail(
     max_jump: float,
     all_ball_owner: Optional[List[Optional[str]]] = None,
     fps: float = 30.0,
+    contact_segments: Optional[List[Tuple[int, str]]] = None,
 ) -> None:
     """繪製近 TRAIL_SEC 秒的球軌跡線 + 最新位置圓點。
-    all_ball_owner 不為 None 時，軌跡顏色跟隨最後擊球者，轉換時漸變。"""
+    contact_segments 優先：[(frame, player), ...] 已排序，flush 時由 buffer 傳入。
+    all_ball_owner 為 fallback（非回合幀用）。"""
     trail_len = max(1, int(TRAIL_SEC * fps))
     start = max(0, center_idx - trail_len + 1)
 
@@ -575,49 +568,60 @@ def draw_ball_trail(
     if not trail:
         return
 
-    # 無 owner 資訊 → 單色 fallback
-    if all_ball_owner is None:
-        pts_segs: List[List[Tuple[int, int]]] = [[]]
-        for _, (x, y) in trail:
-            pt = (int(x), int(y))
-            if pts_segs[-1]:
-                px, py = pts_segs[-1][-1]
-                if math.hypot(x - px, y - py) > max_jump:
-                    pts_segs.append([])
-            pts_segs[-1].append(pt)
-        for seg in pts_segs:
-            if len(seg) >= 2:
-                cv2.polylines(frame, [np.array(seg, dtype=np.int32)],
-                              False, _COLOR_BOTTOM, 2, cv2.LINE_AA)
-        _, lp = trail[-1]
-        cv2.circle(frame, (int(lp[0]), int(lp[1])), 5, _COLOR_BOTTOM, -1)
+    # ── contact_segments 路徑（flush 回合幀）──────────────────────────
+    if contact_segments:
+        grad_pts = max(1, int(_GRADIENT_HALF_SEC * fps))
+
+        # 預計算每個 trail 點的 owner + 找 transition 在 trail 中的位置
+        owners = [_seg_owner(fi, contact_segments) for fi, _ in trail]
+        # transition 在 trail 中的索引
+        trans_indices: List[int] = []
+        for k in range(1, len(owners)):
+            if owners[k] != owners[k - 1]:
+                trans_indices.append(k)
+
+        def _color_seg(k: int) -> Tuple[int, int, int]:
+            base = _COLOR_TOP if owners[k] == "top" else _COLOR_BOTTOM
+            for ti in trans_indices:
+                d = k - ti  # trail 點距離（插值後的幀數）
+                if -grad_pts <= d <= grad_pts:
+                    old_c = _COLOR_TOP if owners[ti - 1] == "top" else _COLOR_BOTTOM
+                    new_c = _COLOR_TOP if owners[ti] == "top" else _COLOR_BOTTOM
+                    t = max(0.0, min(1.0, (d + grad_pts) / (2 * grad_pts)))
+                    return _blend(old_c, new_c, t)
+            return base
+
+        for k in range(len(trail) - 1):
+            _, p1 = trail[k]
+            _, p2 = trail[k + 1]
+            if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > max_jump:
+                continue
+            cv2.line(frame, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])),
+                     _color_seg(k + 1), 2, cv2.LINE_AA)
+
+        last_fi, last_p = trail[-1]
+        cv2.circle(frame, (int(last_p[0]), int(last_p[1])), 5,
+                   _color_seg(len(trail) - 1), -1)
         return
 
-    # 找 owner 轉換幀
-    transitions: List[int] = []
-    prev_o: Optional[str] = None
-    grad_half = max(1, int(_GRADIENT_HALF_SEC * fps))
-    scan_s = max(0, start - grad_half)
-    scan_e = min(center_idx + 1, len(all_ball_owner))
-    for i in range(scan_s, scan_e):
-        o = all_ball_owner[i]
-        if o is not None:
-            if prev_o is not None and o != prev_o:
-                transitions.append(i)
-            prev_o = o
+    # ── fallback: all_ball_owner 路徑（非回合幀）──────────────────────
+    if all_ball_owner is not None:
+        def _fb_color(fi: int) -> Tuple[int, int, int]:
+            owner = all_ball_owner[fi] if fi < len(all_ball_owner) else None
+            return _COLOR_TOP if owner == "top" else _COLOR_BOTTOM
+    else:
+        def _fb_color(fi: int) -> Tuple[int, int, int]:
+            return _COLOR_BOTTOM
 
-    # 逐段繪製
     for k in range(len(trail) - 1):
         fi1, p1 = trail[k]
         fi2, p2 = trail[k + 1]
         if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > max_jump:
             continue
-        c = _owner_color(fi2, all_ball_owner, transitions, fps)
         cv2.line(frame, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])),
-                 c, 2, cv2.LINE_AA)
+                 _fb_color(fi2), 2, cv2.LINE_AA)
 
     last_fi, last_p = trail[-1]
-    cv2.circle(frame, (int(last_p[0]), int(last_p[1])), 5,
-               _owner_color(last_fi, all_ball_owner, transitions, fps), -1)
+    cv2.circle(frame, (int(last_p[0]), int(last_p[1])), 5, _fb_color(last_fi), -1)
 
 

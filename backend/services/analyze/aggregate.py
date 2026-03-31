@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
+from .constants import MIN_BALL_SPEED_KMH
 from .court import project_to_world
 from .analysis import (
-    MIN_BALL_SPEED_KMH,
     assign_court_side, bounce_zone, find_serve_index,
     find_winner_landing, player_court_zone,
 )
@@ -26,6 +26,15 @@ from .analysis import (
 
 def _normalize_pos(pos: Tuple[float, float], width: int, height: int) -> Tuple[float, float]:
     return round(pos[0] / width, 4), round(pos[1] / height, 4)
+
+
+def _empty_player_stats() -> Dict:
+    return {
+        "top": {"shots": 0, "serves": 0, "winners": 0,
+                "shot_types": {"serve": 0, "overhead": 0, "swing": 0, "unknown": 0}},
+        "bottom": {"shots": 0, "serves": 0, "winners": 0,
+                   "shot_types": {"serve": 0, "overhead": 0, "swing": 0, "unknown": 0}},
+    }
 
 
 def _speed_stats(speeds: List[float]) -> Dict:
@@ -113,12 +122,7 @@ def build_single_rally(
 
     # ── per-rally stats 累計器 ────────────────────────────────────────────
     stats: Dict = {
-        "player_stats": {
-            "top": {"shots": 0, "serves": 0, "winners": 0,
-                    "shot_types": {"serve": 0, "overhead": 0, "swing": 0, "unknown": 0}},
-            "bottom": {"shots": 0, "serves": 0, "winners": 0,
-                       "shot_types": {"serve": 0, "overhead": 0, "swing": 0, "unknown": 0}},
-        },
+        "player_stats": _empty_player_stats(),
         "all_speeds": [],
         "serve_speeds": [],
         "rally_speeds": [],
@@ -285,12 +289,7 @@ def build_summary(
     Returns:
         {"summary": {...}, "heatmap": {...}}
     """
-    player_stats: Dict = {
-        "top": {"shots": 0, "serves": 0, "winners": 0,
-                "shot_types": {"serve": 0, "overhead": 0, "swing": 0, "unknown": 0}},
-        "bottom": {"shots": 0, "serves": 0, "winners": 0,
-                   "shot_types": {"serve": 0, "overhead": 0, "swing": 0, "unknown": 0}},
-    }
+    player_stats: Dict = _empty_player_stats()
     all_speeds: List[float] = []
     serve_speeds: List[float] = []
     rally_speeds: List[float] = []

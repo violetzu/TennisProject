@@ -19,9 +19,13 @@ from __future__ import annotations
 import math
 from typing import Dict, List, Optional, Tuple
 
-import cv2
 import numpy as np
 
+from .constants import (
+    WRIST_HIT_RADIUS, WRIST_SEARCH_SEC, SWING_CHECK_SEC,
+    FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC,
+    RALLY_GAP_SEC, MIN_BALL_SPEED_KMH,
+)
 from .court import (
     COURT_LENGTH_M, DOUBLES_WIDTH_M, _NET_Y_M,
     _SERVICE_DIST_M, _SERVICE_Y_NEAR, _SERVICE_Y_FAR,
@@ -39,23 +43,14 @@ def _dist2d(
     return math.hypot(origin[0] - target[0], origin[1] - target[1])
 
 # ── 球速範圍（ITF：最慢約 20 km/h 吊球；最快發球紀錄 263 km/h，280 留緩衝）──
-MIN_BALL_SPEED_KMH = 20.0
 MAX_BALL_SPEED_KMH = 280.0
 
-# ── 事件偵測參數 ───────────────────────────────────────────────────────────────
-WRIST_HIT_RADIUS = 0.08        # 球距手腕 < 畫面高度 8% → 擊球候選
-WRIST_SEARCH_SEC = 0.17        # 局部最小值搜尋窗口（前後各 N 秒）
+# ── 事件偵測參數（僅內部使用）────────────────────────────────────────────────────
 COOLDOWN_SEC = 0.27            # 擊球冷卻（不同球員交替）
 SAME_PLAYER_COOLDOWN_SEC = 0.33  # 同一球員連擊冷卻（防止同次揮拍重複觸發）
 BOUNCE_COOLDOWN_SEC = 0.13     # bounce 後接 hit 允許更短冷卻
 SWING_MIN_WRIST_RATIO = 0.05   # 手腕位移 / 球員縮放閾值（乘以球員 y 位置比例）
-SWING_CHECK_SEC = 0.13         # 揮拍動作檢查窗口（前後各 N 秒）
-FORWARD_COURT_SEC = 0.67       # 擊球後前看秒數，確認球回到場地
-SERVE_TOSS_LOOKBACK_SEC = 0.7  # 發球拋球偵測回看秒數
 SERVE_CROSS_SEC = 3.0          # 擊球後球進入對方發球區的最大等待秒數
-
-# ── 回合切割 ──────────────────────────────────────────────────────────────────
-RALLY_GAP_SEC = 3.5            # 回合間隔閾值（秒）；2.5 太短，底線長回合中球追蹤中斷可能超過 2s
 
 # ── 世界座標球場幾何常數（ITF 標準，公尺）──────────────────────────────────────
 # _SERVICE_DIST_M, _SERVICE_Y_NEAR, _SERVICE_Y_FAR → 從 court.py import
@@ -102,9 +97,11 @@ def compute_frame_speeds_world(
         p0, p1 = positions[i - 1], positions[i]
         if p0 is None or p1 is None:
             continue
-        pts = np.array([[list(p0)], [list(p1)]], dtype=np.float32)
-        world = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
-        dist_m = float(np.linalg.norm(world[1] - world[0]))
+        w0 = project_to_world(p0, H)
+        w1 = project_to_world(p1, H)
+        if w0 is None or w1 is None:
+            continue
+        dist_m = math.hypot(w1[0] - w0[0], w1[1] - w0[1])
         kmh = round(dist_m * fps * 3.6, 1)
         if MIN_BALL_SPEED_KMH <= kmh <= MAX_BALL_SPEED_KMH:
             speeds[i] = kmh
@@ -128,7 +125,7 @@ def detect_events(
     frame_offset: int = 0,
     bbox_height_top: Optional[List[Optional[float]]] = None,
     bbox_height_bottom: Optional[List[Optional[float]]] = None,
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[List[int], List[str], List[int]]:
     """
     第一性原理事件偵測：球靠近手腕 = 擊球，軌跡反轉且遠離所有人 = 觸地。
 
@@ -141,7 +138,7 @@ def detect_events(
       - 球軌跡 vy 由正→負（下→上）反轉且遠離所有球員 → bounce
 
     Returns:
-        (contact_frames, bounce_frames)
+        (contact_frames, contact_players, bounce_frames)
     """
     pos = ball_positions  # 已在呼叫端插值
     n = len(pos)
@@ -193,6 +190,7 @@ def detect_events(
 
     # ── 擊球：球-手腕距離的局部最小值（延遲確認）─────────────────────
     contacts: List[int] = []
+    contact_players: List[str] = []
     bounces: List[int] = []
     last_event = -100
     last_event_type = ""
@@ -346,6 +344,7 @@ def detect_events(
                       f"serve toss but ball never reached opponent court")
                 return
             contacts.append(pi)
+            contact_players.append(pp)
             last_event_type = "contact"
             last_event = pi
             last_event_player = pp
@@ -368,6 +367,7 @@ def detect_events(
             # 備援：快速擊球可能追丟，但球確實進入對方場地
             if _in_opp_court(pi, pp, serve_cross):
                 contacts.append(pi)
+                contact_players.append(pp)
                 last_event_type = "contact"
                 last_event = pi
                 last_event_player = pp
@@ -404,6 +404,7 @@ def detect_events(
             # 備援：發球殘留軌跡在頂部，但球確實進入對方場地（快速發球）
             if _in_opp_court(pi, pp, serve_cross):
                 contacts.append(pi)
+                contact_players.append(pp)
                 last_event_type = "contact"
                 last_event = pi
                 last_event_player = pp
@@ -420,6 +421,7 @@ def detect_events(
                   f"trajectory not in court (out-of-play)")
             return
         contacts.append(pi)
+        contact_players.append(pp)
         last_event_type = "contact"
         last_event = pi
         last_event_player = pp
@@ -517,7 +519,7 @@ def detect_events(
               f"ball={_bstr} d_nearest={f'{d:.0f}' if d is not None else 'inf'}")
 
     print(f"[detect_events] {len(contacts)} hits, {len(bounces)} bounces")
-    return contacts, bounces
+    return contacts, contact_players, bounces
 
 
 # ─────────────────────────────────────────────────────────────────────────────

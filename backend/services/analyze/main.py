@@ -21,7 +21,8 @@ import os
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
-from .ball import BallTracker, WINDOW_SEC
+from .ball import BallTracker
+from .constants import WINDOW_SEC
 from .court import CourtDetector
 from ._log import set_log_file, clear_log_file
 from .player import PoseDetector
@@ -29,6 +30,7 @@ from .buffer import FrameBuffer, FrameSlot, PositionStore
 from .video_io import VideoPipe
 from .vlm_verify import ThumbnailWriter
 from config import VLLM
+
 
 
 def analyze_combine(
@@ -101,35 +103,43 @@ def analyze_combine(
                 for idx, frame in enumerate(pipe.frames()):
                     # 場地偵測
                     court.detect(frame, idx)
-                    ball.update_court_H(court.H)
+                    ball.update_court(court.center_line_px)
 
                     if not court.is_valid:
                         if idx in court.scene_cut_set:
                             ball.reset()
+                            pose.reset()
                         ball.append_none()
                         positions.append_none()
-                        buf.push(FrameSlot(frame, False, [], None))
+                        buf.push(FrameSlot(frame, False, None, None, None))
                         if progress_cb and total_frames:
                             progress_cb(min(int(idx * 95 / total_frames), 94), 100)
                         continue
 
                     # Pose + Ball 推論
-                    top, bot, tw, bw, top_bh, bot_bh, skel = pose.detect(
+                    top, bot = pose.detect(
                         frame, height, court.corners, court.net_y, idx,
                     )
                     box = ball.detect(ball_model, frame, width, height, idx)
 
-                    positions.append(top, bot, tw, bw, top_bh, bot_bh)
+                    positions.append(
+                        top.pos if top else None,
+                        bot.pos if bot else None,
+                        top.wrist if top else None,
+                        bot.wrist if bot else None,
+                        top.bbox_h if top else None,
+                        bot.bbox_h if bot else None,
+                    )
                     ball.append_position(box)
 
                     # 縮圖（非同步寫入）
                     thumbs.maybe_save(
-                        frame, idx, court.get_draw_data(), skel,
+                        frame, idx, court.get_draw_data(), top, bot,
                         ball.all_positions, ball.max_trail_jump,
                     )
 
                     # 推入 buffer（滿 WINDOW 時自動 finalize + route）
-                    buf.push(FrameSlot(frame, True, skel, court.get_draw_data()))
+                    buf.push(FrameSlot(frame, True, top, bot, court.get_draw_data()))
 
                     if progress_cb and total_frames:
                         progress_cb(min(int(idx * 95 / total_frames), 94), 100)
