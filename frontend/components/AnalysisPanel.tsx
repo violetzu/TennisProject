@@ -21,11 +21,11 @@ export default function AnalysisPanel({
 }) {
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
-      <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
+      <div className="grid grid-cols-3 gap-2 px-3 pt-2.5 pb-2">
         {TABS.map((tab) => (
           <div
             key={tab.id}
-            className={`pill-tab py-[7px] px-3 text-base cursor-pointer ${activeTab === tab.id ? "active" : ""}`}
+            className={`pill-tab py-[7px] px-3 text-base text-center whitespace-nowrap cursor-pointer ${activeTab === tab.id ? "active" : ""}`}
             onClick={() => onTabChange(tab.id)}
           >
             {tab.label}
