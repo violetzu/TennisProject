@@ -4,7 +4,6 @@
 包含：
   - BallTracker             跨幀狀態管理（黑名單 + stuck + 跳躍距離過濾）
   - is_valid_ball()         幾何篩選
-  - extract_xyxy_conf()     從 Ultralytics result 取出 boxes
   - compute_max_trail_jump() 根據球速計算最大合理跳躍距離
   - filter_outliers()       迭代離群點過濾
   - draw_ball_trail()       繪製球軌跡線
@@ -19,6 +18,7 @@ import cv2
 import numpy as np
 
 from .constants import WINDOW_SEC  # 跨模組共用，定義於 constants.py
+from .court import CourtPoints  # 僅用於 detect() 的型別標注
 
 
 # ── 跳躍距離限制 ─────────────────────────────────────────────────────────────────
@@ -64,15 +64,9 @@ class BallTracker:
         self._reacq_max_frames = max(1, int(REACQ_MAX_SEC * fps))
         self._stuck_frames_limit = max(1, int(STUCK_SEC_LIMIT * fps))
         self._blacklist_ttl = max(1, int(STATIC_BLACKLIST_TTL_SEC * fps))
-        # 場地中線像素端點（用於場地標記過濾）
-        self._court_center_line = None
         self._center_line_radius: float = (
             math.hypot(width, height) * CENTER_LINE_RADIUS_RATIO if width > 0 else 20.0
         )
-
-    def update_court(self, center_line) -> None:
-        """由主迴圈在每幀 court.detect() 後呼叫，更新中線端點（無效場地時傳 None）。"""
-        self._court_center_line = center_line
 
     def reset(self) -> None:
         self.last_center = None
@@ -123,6 +117,7 @@ class BallTracker:
         img_w: int,
         img_h: int,
         frame_idx: int,
+        court_pts: Optional[CourtPoints] = None,
     ) -> Optional[list]:
         """
         單幀全圖偵測，回傳 [x1,y1,x2,y2] 或 None。
@@ -133,21 +128,28 @@ class BallTracker:
             (x, y, e) for x, y, e in self._blacklist if e > frame_idx
         ]
 
-        preds = model.predict(source=frame, imgsz=1280, conf=0.1, verbose=False, half=True)
-        if not preds:
+        results = model.predict(source=frame, imgsz=1280, conf=0.1, verbose=False, half=True)
+        ball_r = results[0] if results else None
+        if ball_r is None:
             self._on_miss()
             print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s no prediction")
             return None
-
-        xyxy_list, confs = extract_xyxy_conf(preds[0])
+                
+        bx_list   = ball_r.boxes.xyxy.cpu().tolist()
+        conf_list = ball_r.boxes.conf.cpu().tolist()
+        
         cands: List[Tuple[list, float, Tuple[float, float]]] = []
         rejected_geom = 0
         rejected_bl = 0
 
-        for box, conf in zip(xyxy_list, confs):
-            if not is_valid_ball(box, img_w, img_h):
+        for box, conf in zip(bx_list, conf_list):         
+            # 排除畫面極端邊緣的誤偵測
+            _, y1, _, y2 = box[:4]
+            cy = (y1 + y2) / 2
+            if cy < img_h * 0.05 or cy > img_h * 0.98:
                 rejected_geom += 1
                 continue
+            
             gc = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
             if any(
                 math.hypot(gc[0] - bx, gc[1] - by) < STATIC_BLACKLIST_RADIUS
@@ -159,8 +161,8 @@ class BallTracker:
 
         if not cands:
             self._on_miss()
-            if len(xyxy_list) > 0:
-                print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s {len(xyxy_list)} det, "
+            if len(bx_list) > 0:
+                print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s {len(bx_list)} det, "
                       f"geom={rejected_geom} bl={rejected_bl} → 0 cands, miss={self.miss_count}")
             return None
 
@@ -197,8 +199,9 @@ class BallTracker:
 
         # 場地標記過濾，落在中線附近的偵測點直接丟棄，不計入 miss_count
         # 讓追蹤器保持目前 last_center，空幀之後由插值補回。
-        if self._court_center_line is not None:
-            (x1, y1), (x2, y2) = self._court_center_line
+        center_line = court_pts.center_line_px if court_pts else None
+        if center_line is not None:
+            (x1, y1), (x2, y2) = center_line
             dx, dy = x2 - x1, y2 - y1
             seg_len2 = dx * dx + dy * dy
             r = self._center_line_radius
@@ -250,33 +253,6 @@ class BallTracker:
         print(f"  [ball-det] f={frame_idx} t={frame_idx/self._fps:.2f}s "
               f"→ ({cbx:.0f},{cby:.0f}) conf={chosen_conf:.2f}")
         return chosen_box
-
-
-# ── 低階輔助 ──────────────────────────────────────────────────────────────────
-
-def is_valid_ball(box: list, img_w: int, img_h: int) -> bool:
-    """排除畫面極端邊緣的誤偵測。"""
-    _, y1, _, y2 = box[:4]
-    cy = (y1 + y2) / 2
-    if cy < img_h * 0.05 or cy > img_h * 0.98:
-        return False
-    return True
-
-
-def extract_xyxy_conf(result) -> Tuple[list, list]:
-    """從 Ultralytics result 取出 xyxy box list 和 conf list。"""
-    if (
-        result is None
-        or getattr(result, "boxes", None) is None
-        or len(result.boxes) == 0
-    ):
-        return [], []
-    xyxy = result.boxes.xyxy
-    conf = result.boxes.conf
-    if xyxy is None or conf is None:
-        return [], []
-    return xyxy.cpu().tolist(), conf.cpu().tolist()
-
 
 # ── 球速上限跳躍距離 ────────────────────────────────────────────────────────
 

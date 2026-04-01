@@ -4,13 +4,12 @@
 對外 API：
   - PlayerDetection             單一球員偵測結果（pos, bbox_h, kps）
   - PoseDetector.detect()       Pose 偵測，回傳 (top, bot): Optional[PlayerDetection]
-  - PoseDetector.reset()        場景切換時重置追蹤狀態
-  - draw_skeleton_from_data()   繪製骨架，輸入 [(kps, side), ...]
+  - draw_skeleton()   繪製骨架，輸入 PlayerDetection 結果
 
 篩選策略：
-  - 偵測前遮罩：YOLO 推論前蓋黑場外區域（左右各擴一個球道寬，上下延伸至畫面邊緣）
   - 偵測後邊線篩選：球員中心 x 必須在場地左右邊線之間（含 img_h * 0.015 容差）
-  - 追蹤選取：有前幀 → 取位移最小；無前幀 → 取最大面積
+  - 上下分界：以 net_y 作為上下球員分界線
+  - 上下候選球員 → 取最大面積
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from .court import court_side_x_at_y
+from .court import CourtPoints, court_side_x_at_y
 from .constants import COLOR_TOP, COLOR_BOTTOM
 
 # COCO 17 關鍵點骨架連線
@@ -58,8 +57,7 @@ class PoseDetector:
         self,
         frame: np.ndarray,
         img_h: int,
-        court_corners: Optional[np.ndarray] = None,
-        net_y: Optional[float] = None,
+        court_pts: Optional[CourtPoints] = None,
         frame_idx: int = -1,
     ) -> Tuple[Optional[PlayerDetection], Optional[PlayerDetection]]:
         """Pose 偵測 + 球員歸屬。回傳 (top, bot)，每個是 PlayerDetection 或 None。"""
@@ -71,7 +69,7 @@ class PoseDetector:
         kps_list  = pose_r.keypoints.data.cpu().tolist()
         bx_list   = pose_r.boxes.xyxy.cpu().tolist()
         conf_list = pose_r.boxes.conf.cpu().tolist()
-        split_y   = net_y if net_y is not None else img_h * 0.50
+        split_y   = court_pts.net_y 
 
         upper: list = []
         lower: list = []
@@ -82,9 +80,9 @@ class PoseDetector:
             cy = (y1 + y2) / 2.0
             bh = y2 - y1
 
-            # 邊線篩選：球員中心 x 必須在場地左右邊線之間（含 img_h * 0.015 容差 1080p 約15px）
-            if court_corners is not None:
-                left_x, right_x = court_side_x_at_y(court_corners, y2)
+            # 邊線篩選：球員中心 x 必須在場地左右邊線之間（含 img_h * 0.015 容差； 1080p 約15px）
+            if court_pts is not None:
+                left_x, right_x = court_side_x_at_y(court_pts, y2)
                 offset = img_h * 0.015
                 if not (left_x - offset) <= cx <= (right_x + offset):
                     # print(f"  [pose] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) conf={conf:.3f} "
@@ -93,6 +91,7 @@ class PoseDetector:
 
             print(f"  [pose] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) conf={conf:.3f}")
 
+            # 上下分界：以 net_y 作為上下球員分界線；同一邊多個候選 → 取最大面積
             (upper if y2 < split_y else lower).append(
                 ((x2 - x1) * bh, PlayerDetection(pos=(cx, cy), bbox_h=bh, kps=kp))
             )
@@ -104,7 +103,7 @@ class PoseDetector:
         return _best(upper), _best(lower)
 
 
-def draw_skeleton_from_data(
+def draw_skeleton(
     frame: np.ndarray,
     top: Optional["PlayerDetection"],
     bot: Optional["PlayerDetection"],

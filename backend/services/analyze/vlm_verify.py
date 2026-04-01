@@ -19,6 +19,11 @@ import requests
 
 from config import DATA_DIR, VIDEO_URL_DOMAIN
 
+
+from .court import draw_court
+from .player import draw_skeleton
+from .ball import draw_ball_trail
+
 # ── 常數 ──────────────────────────────────────────────────────────────────────
 THUMB_STRIDE_SEC         = 0.17  # 每 N 秒儲存一張縮圖
 THUMB_W                  = 320   # 縮圖寬度（px）
@@ -62,7 +67,7 @@ class ThumbnailWriter:
         self,
         frame: np.ndarray,
         idx: int,
-        court_draw_data,
+        court_pts,
         top,
         bot,
         ball_positions,
@@ -71,11 +76,14 @@ class ThumbnailWriter:
         """每 stride 幀存一張縮圖。非阻塞（除非 queue 滿）。"""
         if idx % self.stride != 0:
             return
-        from .draw import draw_annotations
-
         thumb = frame.copy()
-        draw_annotations(thumb, court_draw_data, top, bot,
-                         idx, ball_positions, max_trail_jump, fps=self._fps)
+        
+        draw_court(thumb, court_pts)   
+        draw_skeleton(thumb, top, bot)
+
+        draw_ball_trail(thumb, idx, ball_positions, max_trail_jump,
+                        None, fps=self._fps, contact_segments=None)
+        
         small = cv2.resize(thumb, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
         self._queue.put((small, self.thumb_dir / f"frame_{idx:06d}.jpg"))
 

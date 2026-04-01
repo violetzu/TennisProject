@@ -23,14 +23,13 @@ from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .ball import BallTracker, finalize_extras
+from .ball import BallTracker, finalize_extras, draw_ball_trail
 from .constants import (
     WINDOW_SEC, WRIST_HIT_RADIUS, RALLY_GAP_SEC,
     WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC,
 )
-from .court import CourtDetector
-from .draw import draw_annotations
-from .player import PlayerDetection
+from .court import CourtDetectior, CourtPoints , draw_court
+from .player import PlayerDetection , draw_skeleton
 from .analysis import (
     detect_events, assign_court_side,
     compute_frame_speeds_world, smooth, find_winner_landing,
@@ -51,7 +50,7 @@ class FrameSlot:
     court_valid: bool
     top: Optional["PlayerDetection"]
     bot: Optional["PlayerDetection"]
-    court_draw_data: Optional[Tuple]
+    court_pts: Optional[CourtPoints]
 
 
 @dataclass
@@ -65,13 +64,13 @@ class PositionStore:
     bbox_height_bottom: List[Optional[float]] = field(default_factory=list)
     ball_owner: List[Optional[str]] = field(default_factory=list)
 
-    def append(self, top, bot, tw, bw, top_bh=None, bot_bh=None) -> None:
-        self.player_top.append(top)
-        self.player_bottom.append(bot)
-        self.wrist_top.append(tw)
-        self.wrist_bottom.append(bw)
-        self.bbox_height_top.append(top_bh)
-        self.bbox_height_bottom.append(bot_bh)
+    def append(self, top, bot) -> None:
+        self.player_top.append(top.pos if top else None)
+        self.player_bottom.append(bot.pos if bot else None)
+        self.wrist_top.append(top.wrist if top else None)
+        self.wrist_bottom.append(bot.wrist if bot else None)
+        self.bbox_height_top.append(top.bbox_h if top else None)
+        self.bbox_height_bottom.append(bot.bbox_h if bot else None)
         self.ball_owner.append(None)
 
     def append_none(self) -> None:
@@ -98,7 +97,7 @@ class FrameBuffer:
         video_pipe,                     # VideoPipe
         ball: BallTracker,
         positions: PositionStore,
-        court: CourtDetector,
+        court: CourtDetectior,
         thumb_dir,
         vllm_cfg,
     ):
@@ -420,13 +419,12 @@ class FrameBuffer:
         self, slot: FrameSlot, widx: int,
         contact_segments=None,
     ) -> None:
-        """統一繪製 court + skeleton + ball trail → write to encoder。"""
-        draw_annotations(
-            slot.frame, slot.court_draw_data, slot.top, slot.bot,
-            widx, self._ball.all_positions, self._ball.max_trail_jump,
-            self._pos.ball_owner, fps=self._fps,
-            contact_segments=contact_segments, court_valid=slot.court_valid,
-        )
+        """統一繪製 court + skeleton + ball trail → write to encoder。"""       
+        draw_court(slot.frame, slot.court_pts)   
+        draw_skeleton(slot.frame, slot.top, slot.bot)
+
+        draw_ball_trail(slot.frame, widx, self._ball.all_positions, self._ball.max_trail_jump,
+                        self._pos.ball_owner, fps=self._fps, contact_segments=contact_segments)
         self._pipe.write(slot.frame)
 
     # ── internal: VLM outcome fill ────────────────────────────────────────────
