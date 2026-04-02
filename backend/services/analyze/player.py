@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from .court import CourtPoints, court_side_x_at_y
-from .constants import COLOR_TOP, COLOR_BOTTOM
+from .constants import COLOR_TOP, COLOR_BOTTOM, WINDOW_SEC
 
 # COCO 17 關鍵點骨架連線
 SKELETON_LINKS = [
@@ -50,15 +50,13 @@ class PoseDetector:
 
     def __init__(self, model):
         self.model = model
-        self._prev_top: Optional[Tuple[float, float]] = None
-        self._prev_bot: Optional[Tuple[float, float]] = None
 
     def detect(
         self,
         frame: np.ndarray,
         img_h: int,
-        court_pts: Optional[CourtPoints] = None,
-        frame_idx: int = -1,
+        frame_idx: int,
+        court_pts: Optional[CourtPoints] = None,   
     ) -> Tuple[Optional[PlayerDetection], Optional[PlayerDetection]]:
         """Pose 偵測 + 球員歸屬。回傳 (top, bot)，每個是 PlayerDetection 或 None。"""
         results = self.model.predict(source=frame, imgsz=1280, conf=0.01, verbose=False, half=True)
@@ -89,7 +87,7 @@ class PoseDetector:
                     #       f"cx={cx:.0f} not in [{left_x-offset:.0f}, {right_x+offset:.0f}] → outside court")
                     continue
 
-            print(f"  [pose] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) conf={conf:.3f}")
+            # print(f"  [pose] f={frame_idx} bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f}) conf={conf:.3f}")
 
             # 上下分界：以 net_y 作為上下球員分界線；同一邊多個候選 → 取最大面積
             (upper if y2 < split_y else lower).append(
@@ -100,7 +98,75 @@ class PoseDetector:
         def _best(candidates) -> Optional[PlayerDetection]:
             return max(candidates, key=lambda c: c[0])[1] if candidates else None
 
-        return _best(upper), _best(lower)
+        top, bot = _best(upper), _best(lower)
+        print(f"f={frame_idx} [top]={'None' if top is None else f'pos=({top.pos[0]:.0f},{top.pos[1]:.0f}) bh={top.bbox_h:.0f}'}")
+        print(f"f={frame_idx} [bot]={'None' if bot is None else f'pos=({bot.pos[0]:.0f},{bot.pos[1]:.0f}) bh={bot.bbox_h:.0f}'}")
+        return top, bot
+
+    def finalize(self, all_top: List[Optional["PlayerDetection"]],
+                 all_bot: List[Optional["PlayerDetection"]],
+                 write_idx: int, prev_final: int, fps: float,
+                 scene_cut_set: set, max_gap: int = 15) -> None:
+        """對 all_top / all_bot 缺失幀做整個 PlayerDetection 插值（含 kps 骨架）。"""
+        win_frames = max(1, int(WINDOW_SEC * fps))
+        interp_start = max(0, prev_final + 1)
+        for dets in (all_top, all_bot):
+            end = min(len(dets), write_idx + win_frames + 1)
+            self._interpolate_detections(dets, interp_start, write_idx, end,
+                                         scene_cut_set, max_gap)
+
+    @staticmethod
+    def _lerp_det(d0: PlayerDetection, d1: PlayerDetection,
+                  t: float) -> PlayerDetection:
+        """線性插值兩個 PlayerDetection（pos + bbox_h + 全 17 關鍵點）。"""
+        pos = (d0.pos[0] + t * (d1.pos[0] - d0.pos[0]),
+               d0.pos[1] + t * (d1.pos[1] - d0.pos[1]))
+        bbox_h = d0.bbox_h + t * (d1.bbox_h - d0.bbox_h)
+        kps = [
+            (x0 + t * (x1 - x0),
+             y0 + t * (y1 - y0),
+             min(c0, c1))
+            for (x0, y0, c0), (x1, y1, c1) in zip(d0.kps, d1.kps)
+        ]
+        return PlayerDetection(pos=pos, bbox_h=bbox_h, kps=kps)
+
+    @staticmethod
+    def _interpolate_detections(
+        dets: List[Optional[PlayerDetection]],
+        interp_start: int,
+        write_idx: int,
+        end: int,
+        scene_cut_set: set,
+        max_gap: int,
+    ) -> None:
+        """原地填補 None 的 PlayerDetection 幀（線性插值骨架）。"""
+        i = interp_start
+        while i <= write_idx:
+            if dets[i] is not None:
+                i += 1
+                continue
+            prev_i = i - 1
+            while prev_i >= 0 and dets[prev_i] is None:
+                prev_i -= 1
+            next_i = i
+            while next_i < end and dets[next_i] is None:
+                next_i += 1
+            if prev_i < 0 or next_i >= end:
+                i = max(next_i, i + 1)
+                continue
+            gap = next_i - prev_i
+            if gap > max_gap:
+                i = next_i
+                continue
+            if any(prev_i < sc <= next_i for sc in scene_cut_set):
+                i = next_i
+                continue
+            d0, d1 = dets[prev_i], dets[next_i]
+            for j in range(max(prev_i + 1, interp_start), min(next_i, write_idx + 1)):
+                if dets[j] is None:
+                    dets[j] = PoseDetector._lerp_det(d0, d1, (j - prev_i) / gap)
+                    print(f"  [pose] interp f={j} from f={prev_i} to f={next_i} gap={gap}")
+            i = next_i
 
 
 def draw_skeleton(

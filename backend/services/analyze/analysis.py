@@ -23,14 +23,15 @@ import numpy as np
 
 from .constants import (
     WRIST_HIT_RADIUS, WRIST_SEARCH_SEC, SWING_CHECK_SEC,
-    FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC,
-    RALLY_GAP_SEC, MIN_BALL_SPEED_KMH,
+    FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC, SERVE_CROSS_SEC,
+    RALLY_GAP_SEC, MIN_BALL_SPEED_KMH, MAX_BALL_SPEED_KMH,
 )
 from .court import (
     COURT_LENGTH_M, DOUBLES_WIDTH_M, _NET_Y_M,
     _SERVICE_DIST_M, _SERVICE_Y_NEAR, _SERVICE_Y_FAR,
     project_to_world,
 )
+from .player import PlayerDetection
 
 
 def _dist2d(
@@ -42,15 +43,11 @@ def _dist2d(
         return float("inf")
     return math.hypot(origin[0] - target[0], origin[1] - target[1])
 
-# ── 球速範圍（ITF：最慢約 20 km/h 吊球；最快發球紀錄 263 km/h，280 留緩衝）──
-MAX_BALL_SPEED_KMH = 280.0
-
 # ── 事件偵測參數（僅內部使用）────────────────────────────────────────────────────
 COOLDOWN_SEC = 0.27            # 擊球冷卻（不同球員交替）
 SAME_PLAYER_COOLDOWN_SEC = 0.33  # 同一球員連擊冷卻（防止同次揮拍重複觸發）
 BOUNCE_COOLDOWN_SEC = 0.13     # bounce 後接 hit 允許更短冷卻
 SWING_MIN_WRIST_RATIO = 0.05   # 手腕位移 / 球員縮放閾值（乘以球員 y 位置比例）
-SERVE_CROSS_SEC = 3.0          # 擊球後球進入對方發球區的最大等待秒數
 
 # ── 世界座標球場幾何常數（ITF 標準，公尺）──────────────────────────────────────
 # _SERVICE_DIST_M, _SERVICE_Y_NEAR, _SERVICE_Y_FAR → 從 court.py import
@@ -75,6 +72,28 @@ def smooth(values: List[Optional[float]], window: int = 3) -> List[Optional[floa
 # ─────────────────────────────────────────────────────────────────────────────
 # 球速換算（僅世界座標，無 fallback）
 # ─────────────────────────────────────────────────────────────────────────────
+
+_SPEED_LOOK_AHEAD_SEC = 0.4  # 擊球後找球速峰值的時間窗口
+
+
+def get_speed_after(
+    frame_idx: int,
+    smooth_speeds: List[Optional[float]],
+    fps: float,
+    speed_offset: int = 0,
+) -> Optional[float]:
+    """擊球後 _SPEED_LOOK_AHEAD_SEC 秒內的峰值球速（km/h）；找不到回傳 None。"""
+    look_ahead = max(1, int(_SPEED_LOOK_AHEAD_SEC * fps))
+    adj = frame_idx - speed_offset
+    if adj < 0 or adj >= len(smooth_speeds):
+        return None
+    peaks = [
+        smooth_speeds[j]
+        for j in range(adj, min(adj + look_ahead, len(smooth_speeds)))
+        if smooth_speeds[j] is not None and smooth_speeds[j] >= MIN_BALL_SPEED_KMH
+    ]
+    return round(max(peaks), 1) if peaks else None
+
 
 def compute_frame_speeds_world(
     positions: List[Optional[Tuple[float, float]]],
@@ -114,17 +133,13 @@ def compute_frame_speeds_world(
 
 def detect_events(
     ball_positions: List[Optional[Tuple[float, float]]],
-    wrist_top: List[Optional[Tuple[float, float]]],
-    wrist_bottom: List[Optional[Tuple[float, float]]],
-    player_top: List[Optional[Tuple[float, float]]],
-    player_bottom: List[Optional[Tuple[float, float]]],
+    all_top: List[Optional[PlayerDetection]],
+    all_bot: List[Optional[PlayerDetection]],
     img_w: int,
     img_h: int,
     fps: float,
     scene_cut_frames: List[int],
     frame_offset: int = 0,
-    bbox_height_top: Optional[List[Optional[float]]] = None,
-    bbox_height_bottom: Optional[List[Optional[float]]] = None,
 ) -> Tuple[List[int], List[str], List[int]]:
     """
     第一性原理事件偵測：球靠近手腕 = 擊球，軌跡反轉且遠離所有人 = 觸地。
@@ -162,16 +177,18 @@ def detect_events(
         bp = pos[i]
         if bp is None:
             continue
-        wt = wrist_top[i] if i < len(wrist_top) else None
-        wb = wrist_bottom[i] if i < len(wrist_bottom) else None
+        t_det = all_top[i] if i < len(all_top) else None
+        b_det = all_bot[i] if i < len(all_bot) else None
+        wt = t_det.wrist if t_det else None
+        wb = b_det.wrist if b_det else None
         d_top = _dist2d(bp, wt)
         d_bot = _dist2d(bp, wb)
 
         # 手腕漏偵測補償：球在該球員半場 → 用身體中心 fallback
-        if wt is None and i < len(player_top) and player_top[i] is not None:
-            d_top = _dist2d(bp, player_top[i])
-        if wb is None and i < len(player_bottom) and player_bottom[i] is not None:
-            d_bot = _dist2d(bp, player_bottom[i])
+        if wt is None and t_det is not None:
+            d_top = _dist2d(bp, t_det.pos)
+        if wb is None and b_det is not None:
+            d_bot = _dist2d(bp, b_det.pos)
 
         if d_top <= d_bot:
             ball_wrist_dist[i] = d_top
@@ -201,10 +218,11 @@ def detect_events(
 
     def _wrist_move(frame_idx: int, player: str) -> float:
         """計算該球員手腕在 ±SW 幀內的最大位移（像素）。"""
-        wl = wrist_top if player == "top" else wrist_bottom
+        dets = all_top if player == "top" else all_bot
         pts = []
         for j in range(max(0, frame_idx - SW), min(n, frame_idx + SW + 1)):
-            w = wl[j] if j < len(wl) else None
+            d = dets[j] if j < len(dets) else None
+            w = d.wrist if d else None
             if w is not None:
                 pts.append(w)
         if len(pts) < 2:
@@ -221,18 +239,18 @@ def detect_events(
         """根據球員 bbox 高度縮放閾值（透視縮放：遠端 bbox 小 → 閾值低）。
         當前幀 bbox 不可用時，向前後各搜尋 SW 幀取最近有效值；
         完全找不到時 fallback 到 y 比例估算。"""
-        bh_list = bbox_height_top if player == "top" else bbox_height_bottom
+        dets = all_top if player == "top" else all_bot
         bh = None
-        if bh_list is not None:
-            for j in range(max(0, frame_idx - SW), min(n, frame_idx + SW + 1)):
-                if j < len(bh_list) and bh_list[j] is not None:
-                    bh = bh_list[j]
-                    break
+        for j in range(max(0, frame_idx - SW), min(n, frame_idx + SW + 1)):
+            d = dets[j] if j < len(dets) else None
+            if d is not None and d.bbox_h is not None:
+                bh = d.bbox_h
+                break
         if bh is not None:
             return bh * SWING_MIN_WRIST_RATIO
         # fallback: y 比例
-        pl = player_top if player == "top" else player_bottom
-        pp = pl[frame_idx] if frame_idx < len(pl) else None
+        d = dets[frame_idx] if frame_idx < len(dets) else None
+        pp = d.pos if d else None
         scale = pp[1] / img_h if pp is not None else 0.5
         return img_h * SWING_MIN_WRIST_RATIO * scale
 
@@ -241,8 +259,9 @@ def detect_events(
         bp = pos[fi] if fi < n else None
         if bp is None:
             return False
-        pl = player_top if player == "top" else player_bottom
-        pp_pos = pl[fi] if fi < len(pl) else None
+        dets = all_top if player == "top" else all_bot
+        d = dets[fi] if fi < len(dets) else None
+        pp_pos = d.pos if d else None
         if pp_pos is None:
             return False
         # A: 球在球員頭頂上方，垂直距離合理，且水平接近
@@ -314,13 +333,13 @@ def detect_events(
         wm = _wrist_move(pi, pp)
         thr = _swing_threshold(pi, pp)
         if wm < thr:
-            bh_list = bbox_height_top if pp == "top" else bbox_height_bottom
+            _dets = all_top if pp == "top" else all_bot
             bh = None
-            if bh_list is not None:
-                for j in range(max(0, pi - SW), min(n, pi + SW + 1)):
-                    if j < len(bh_list) and bh_list[j] is not None:
-                        bh = bh_list[j]
-                        break
+            for j in range(max(0, pi - SW), min(n, pi + SW + 1)):
+                _d = _dets[j] if j < len(_dets) else None
+                if _d is not None and _d.bbox_h is not None:
+                    bh = _d.bbox_h
+                    break
             _bh_str = f" bbox_h={bh:.0f}" if bh is not None else " bbox_h=None"
             print(f"  [hit-rejected] f={pi + frame_offset} t={(pi + frame_offset)/fps:.2f}s player={pp} "
                   f"wrist_move={wm:.0f} < {thr:.0f}{_bh_str}")
@@ -575,8 +594,8 @@ def player_court_zone(world_y: float) -> str:
 def assign_court_side(
     frame_idx: int,
     ball_positions: List[Optional[Tuple[float, float]]],
-    player_top: List[Optional[Tuple[float, float]]],
-    player_bottom: List[Optional[Tuple[float, float]]],
+    all_top: List[Optional[PlayerDetection]],
+    all_bot: List[Optional[PlayerDetection]],
     H: Optional[np.ndarray],
     height: int,
 ) -> str:
@@ -588,8 +607,10 @@ def assign_court_side(
             return "bottom" if w[1] < _NET_Y_M else "top"
     if bp is not None:
         return "bottom" if bp[1] > height * 0.5 else "top"
-    tp = player_top[frame_idx] if frame_idx < len(player_top) else None
-    bp2 = player_bottom[frame_idx] if frame_idx < len(player_bottom) else None
+    t_det = all_top[frame_idx] if frame_idx < len(all_top) else None
+    b_det = all_bot[frame_idx] if frame_idx < len(all_bot) else None
+    tp = t_det.pos if t_det else None
+    bp2 = b_det.pos if b_det else None
     if tp and bp2:
         return "top" if tp[1] < bp2[1] else "bottom"
     return "top" if tp else "bottom"
@@ -602,8 +623,8 @@ def assign_court_side(
 def find_serve_index(
     rally_contacts: List[int],
     ball_positions: List[Optional[Tuple[float, float]]],
-    player_top: List[Optional[Tuple[float, float]]],
-    player_bottom: List[Optional[Tuple[float, float]]],
+    all_top: List[Optional[PlayerDetection]],
+    all_bot: List[Optional[PlayerDetection]],
     H: Optional[np.ndarray],
     height: int,
     fps: float,
@@ -616,10 +637,10 @@ def find_serve_index(
     if len(rally_contacts) < 2:
         return 0
     first_side = assign_court_side(
-        rally_contacts[0], ball_positions, player_top, player_bottom, H, height)
+        rally_contacts[0], ball_positions, all_top, all_bot, H, height)
     for ci in range(1, len(rally_contacts)):
         side = assign_court_side(
-            rally_contacts[ci], ball_positions, player_top, player_bottom, H, height)
+            rally_contacts[ci], ball_positions, all_top, all_bot, H, height)
         if side != first_side:
             return ci - 1
     return 0

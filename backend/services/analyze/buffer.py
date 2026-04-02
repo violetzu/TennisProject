@@ -18,24 +18,24 @@ import math
 import shutil
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .ball import BallTracker, finalize_extras, draw_ball_trail
+from .ball import BallTracker, draw_ball_trail
 from .constants import (
     WINDOW_SEC, WRIST_HIT_RADIUS, RALLY_GAP_SEC,
-    WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC,
+    WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC, SERVE_CROSS_SEC,
 )
-from .court import CourtDetectior, CourtPoints , draw_court
-from .player import PlayerDetection , draw_skeleton
+from .court import CourtDetectior, CourtPoints, draw_court
+from .player import PoseDetector, PlayerDetection, draw_skeleton
 from .analysis import (
     detect_events, assign_court_side,
     compute_frame_speeds_world, smooth, find_winner_landing,
 )
 from .aggregate import build_single_rally, build_summary
-from .vlm_verify import verify_rally_winner
+from .vlm_verify import ThumbnailWriter, verify_rally_winner
 from ._log import get_log_file, set_log_file, clear_log_file
 
 
@@ -45,40 +45,13 @@ from ._log import get_log_file, set_log_file, clear_log_file
 
 @dataclass
 class FrameSlot:
-    """一幀的 raw pixels + 偵測 metadata。"""
+    """一幀的 raw pixels + court metadata + 偵測結果。"""
     frame: np.ndarray
     court_valid: bool
-    top: Optional["PlayerDetection"]
-    bot: Optional["PlayerDetection"]
     court_pts: Optional[CourtPoints]
-
-
-@dataclass
-class PositionStore:
-    """球員/手腕位置累計容器。"""
-    player_top: List[Optional[Tuple[float, float]]] = field(default_factory=list)
-    player_bottom: List[Optional[Tuple[float, float]]] = field(default_factory=list)
-    wrist_top: List[Optional[Tuple[float, float]]] = field(default_factory=list)
-    wrist_bottom: List[Optional[Tuple[float, float]]] = field(default_factory=list)
-    bbox_height_top: List[Optional[float]] = field(default_factory=list)
-    bbox_height_bottom: List[Optional[float]] = field(default_factory=list)
-    ball_owner: List[Optional[str]] = field(default_factory=list)
-
-    def append(self, top, bot) -> None:
-        self.player_top.append(top.pos if top else None)
-        self.player_bottom.append(bot.pos if bot else None)
-        self.wrist_top.append(top.wrist if top else None)
-        self.wrist_bottom.append(bot.wrist if bot else None)
-        self.bbox_height_top.append(top.bbox_h if top else None)
-        self.bbox_height_bottom.append(bot.bbox_h if bot else None)
-        self.ball_owner.append(None)
-
-    def append_none(self) -> None:
-        for lst in (self.player_top, self.player_bottom,
-                    self.wrist_top, self.wrist_bottom,
-                    self.bbox_height_top, self.bbox_height_bottom,
-                    self.ball_owner):
-            lst.append(None)
+    top:  Optional["PlayerDetection"] = None
+    bot:  Optional["PlayerDetection"] = None
+    ball: Optional[Tuple[float, float]] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,9 +69,9 @@ class FrameBuffer:
         height: int,
         video_pipe,                     # VideoPipe
         ball: BallTracker,
-        positions: PositionStore,
+        pose: PoseDetector,
         court: CourtDetectior,
-        thumb_dir,
+        thumbs: ThumbnailWriter,
         vllm_cfg,
     ):
         self._fps = fps
@@ -106,15 +79,23 @@ class FrameBuffer:
         self._height = height
         self._pipe = video_pipe
         self._ball = ball
-        self._pos = positions
+        self._pose = pose
         self._court = court
-        self._thumb_dir = thumb_dir
+        self._thumbs = thumbs
+        self._thumb_dir = thumbs.thumb_dir   # VLM cleanup 仍需要路徑
         self._vllm_cfg = vllm_cfg
+        # ball_owner：每幀球的持有者，由 FrameBuffer 統一管理
+        self._ball_owner: List[Optional[str]] = []
+
+        # ── 偵測歷史（ball/top/bot 與 ball_owner 等長）───────────────────
+        self._all_ball: List[Optional[Tuple[float, float]]] = []
+        self._all_top:  List[Optional["PlayerDetection"]] = []
+        self._all_bot:  List[Optional["PlayerDetection"]] = []
+        self._finalized_idx: int = -1
 
         # ── sliding window ────────────────────────────────────────────────
         self._window: Deque[FrameSlot] = deque(maxlen=window_size)
         self._write_idx: int = 0
-        self._finalized: List[int] = [-1]
 
         # ── rally state ───────────────────────────────────────────────────
         self._hit_r: float = height * WRIST_HIT_RADIUS
@@ -134,6 +115,10 @@ class FrameBuffer:
 
     def push(self, slot: FrameSlot) -> None:
         """推入一幀，滿 WINDOW 時自動 finalize + route。"""
+        self._ball_owner.append(None)
+        self._all_ball.append(slot.ball)
+        self._all_top.append(slot.top)
+        self._all_bot.append(slot.bot)
         self._window.append(slot)
         if len(self._window) == self._window.maxlen:
             self._process_oldest()
@@ -145,11 +130,10 @@ class FrameBuffer:
             widx = self._write_idx
             slot = self._window[0]
 
-            prev_final = self._finalized[0]
-            self._ball.finalize(widx, self._court.scene_cut_set, self._finalized)
-            finalize_extras(widx, prev_final, self._fps, self._court.scene_cut_set,
-                            [self._pos.player_top, self._pos.player_bottom,
-                             self._pos.wrist_top, self._pos.wrist_bottom])
+            prev_final = self._finalized_idx
+            self._ball.finalize(self._all_ball, widx, prev_final, self._court.scene_cut_set)
+            self._pose.finalize(self._all_top, self._all_bot, widx, prev_final, self._fps, self._court.scene_cut_set)
+            self._finalized_idx = widx
 
             self._route_frame(slot, widx)
             self._write_idx += 1
@@ -186,11 +170,10 @@ class FrameBuffer:
         """處理滑動窗口最舊的一幀：finalize → route。"""
         widx = self._write_idx
 
-        prev_final = self._finalized[0]
-        self._ball.finalize(widx, self._court.scene_cut_set, self._finalized)
-        finalize_extras(widx, prev_final, self._fps, self._court.scene_cut_set,
-                        [self._pos.player_top, self._pos.player_bottom,
-                         self._pos.wrist_top, self._pos.wrist_bottom])
+        prev_final = self._finalized_idx
+        self._ball.finalize(self._all_ball, widx, prev_final, self._court.scene_cut_set)
+        self._pose.finalize(self._all_top, self._all_bot, widx, prev_final, self._fps, self._court.scene_cut_set)
+        self._finalized_idx = widx
 
         slot = self._window[0]
         self._route_frame(slot, widx)
@@ -225,33 +208,31 @@ class FrameBuffer:
                 self._flush_rally()
 
             # 球軌跡：依半場判定 owner
-            self._pos.ball_owner[widx] = self._half_court_owner(widx)
+            self._ball_owner[widx] = self._half_court_owner(widx)
             self._draw_and_encode(slot, widx)
 
     def _check_proximity(self, widx: int) -> bool:
         """球是否在任一手腕附近。"""
-        bp = (self._ball.all_positions[widx]
-              if widx < len(self._ball.all_positions) else None)
+        bp = self._all_ball[widx] if widx < len(self._all_ball) else None
         if bp is None:
             return False
-        wt = (self._pos.wrist_top[widx]
-              if widx < len(self._pos.wrist_top) else None)
-        wb = (self._pos.wrist_bottom[widx]
-              if widx < len(self._pos.wrist_bottom) else None)
+        t = self._all_top[widx] if widx < len(self._all_top) else None
+        b = self._all_bot[widx] if widx < len(self._all_bot) else None
+        wt = t.wrist if t else None
+        wb = b.wrist if b else None
         d_t = math.hypot(bp[0] - wt[0], bp[1] - wt[1]) if wt else float("inf")
         d_b = math.hypot(bp[0] - wb[0], bp[1] - wb[1]) if wb else float("inf")
         return min(d_t, d_b) < self._hit_r
 
     def _half_court_owner(self, widx: int) -> Optional[str]:
         """非回合中：依球在哪個半場決定 owner 顏色。"""
-        bp = (self._ball.all_positions[widx]
-              if widx < len(self._ball.all_positions) else None)
+        bp = self._all_ball[widx] if widx < len(self._all_ball) else None
         if bp is None:
-            return (self._pos.ball_owner[widx - 1]
-                    if widx > 0 and widx - 1 < len(self._pos.ball_owner) else None)
+            return (self._ball_owner[widx - 1]
+                    if widx > 0 and widx - 1 < len(self._ball_owner) else None)
         return assign_court_side(
-            widx, self._ball.all_positions,
-            self._pos.player_top, self._pos.player_bottom,
+            widx, self._all_ball,
+            self._all_top, self._all_bot,
             self._court.last_valid_H, self._height)
 
     # ── internal: rally flush (核心) ──────────────────────────────────────────
@@ -269,22 +250,19 @@ class FrameBuffer:
         margin = max(int(WRIST_SEARCH_SEC * self._fps),
                      int(SWING_CHECK_SEC * self._fps),
                      int(FORWARD_COURT_SEC * self._fps),
-                     int(SERVE_TOSS_LOOKBACK_SEC * self._fps)) + 1
+                     int(SERVE_TOSS_LOOKBACK_SEC * self._fps),
+                     int(SERVE_CROSS_SEC * self._fps)) + 1
         ctx_s = max(0, seg_s - margin)
-        ctx_e = min(len(self._ball.all_positions) - 1, seg_e + margin)
+        ctx_e = min(len(self._all_ball) - 1, seg_e + margin)
 
         seg_cuts = [sc - ctx_s for sc in self._court.scene_cuts
                     if ctx_s <= sc <= ctx_e]
         contacts, contact_players, bounces = detect_events(
-            self._ball.all_positions[ctx_s:ctx_e + 1],
-            self._pos.wrist_top[ctx_s:ctx_e + 1],
-            self._pos.wrist_bottom[ctx_s:ctx_e + 1],
-            self._pos.player_top[ctx_s:ctx_e + 1],
-            self._pos.player_bottom[ctx_s:ctx_e + 1],
+            self._all_ball[ctx_s:ctx_e + 1],
+            self._all_top[ctx_s:ctx_e + 1],
+            self._all_bot[ctx_s:ctx_e + 1],
             self._width, self._height, self._fps, seg_cuts,
             frame_offset=ctx_s,
-            bbox_height_top=self._pos.bbox_height_top[ctx_s:ctx_e + 1],
-            bbox_height_bottom=self._pos.bbox_height_bottom[ctx_s:ctx_e + 1],
         )
 
         # 轉絕對索引，只保留 segment 內的
@@ -300,13 +278,13 @@ class FrameBuffer:
         # ── 2. assign ball_owner ──────────────────────────────────────────
         # contact 幀直接用 hit detection 判定的 player（比 assign_court_side 更準確）
         for c, player in zip(abs_contacts, abs_contact_players):
-            self._pos.ball_owner[c] = player
+            self._ball_owner[c] = player
 
         # forward-fill
         for fi in range(seg_s, seg_e + 1):
-            if self._pos.ball_owner[fi] is None:
-                self._pos.ball_owner[fi] = (
-                    self._pos.ball_owner[fi - 1] if fi > 0 else None)
+            if self._ball_owner[fi] is None:
+                self._ball_owner[fi] = (
+                    self._ball_owner[fi - 1] if fi > 0 else None)
 
         # ── 3. 畫全部 + encode ────────────────────────────────────────────
         frame_bytes = len(self._rally_slots) * self._width * self._height * 3
@@ -324,11 +302,11 @@ class FrameBuffer:
         # ── 4. 球速計算（僅計算回合段，避免全片重掃）──────────────────
         H = self._court.last_valid_H
         spd_s = max(0, seg_s - int(self._fps))
-        spd_e = min(len(self._ball.all_positions) - 1,
+        spd_e = min(len(self._all_ball) - 1,
                     seg_e + int(self._fps * 3))
         if H is not None:
             raw_speeds = compute_frame_speeds_world(
-                self._ball.all_positions[spd_s:spd_e + 1], self._fps, H)
+                self._all_ball[spd_s:spd_e + 1], self._fps, H)
         else:
             raw_speeds = [None] * (spd_e - spd_s + 1)
         smooth_speeds = smooth(raw_speeds, 5)
@@ -370,18 +348,18 @@ class FrameBuffer:
                     rally_idx=rally_idx,
                     rally_contacts=group_contacts,
                     bounces_f=group_bounces,
-                    pos_interp=self._ball.all_positions,
+                    pos_interp=self._all_ball,
                     smooth_speeds=smooth_speeds,
                     speed_offset=speed_offset,
-                    all_player_top=self._pos.player_top,
-                    all_player_bottom=self._pos.player_bottom,
+                    all_top=self._all_top,
+                    all_bot=self._all_bot,
                     scene_cut_frames=self._court.scene_cuts,
                     vlm_shot_types=vlm_shot_types,
                     last_valid_H=H,
                     width=self._width,
                     height=self._height,
                     fps=self._fps,
-                    total_frames=len(self._ball.all_positions),
+                    total_frames=len(self._all_ball),
                     next_rally_start=next_start,
                 )
 
@@ -389,25 +367,11 @@ class FrameBuffer:
                 self._per_rally_stats.append(stats)
 
                 # ── 6. VLM 背景判斷 ──────────────────────────────────────
-                local_idx = len(self.rally_results) - 1
-                _lf = get_log_file()
-                _contact = group_contacts[-1]
-                _next = next_start
-                _tdir = self._thumb_dir
-                _fps = self._fps
-                _vcfg = self._vllm_cfg
-
-                def _vlm_task(lf=_lf, c=_contact, n=_next, td=_tdir, fps=_fps, vc=_vcfg):
-                    if lf:
-                        set_log_file(lf)
-                    try:
-                        return verify_rally_winner(c, n, td, fps, vc)
-                    finally:
-                        if lf:
-                            clear_log_file()
-
-                future = self._vlm_executor.submit(_vlm_task)
-                self._vlm_futures.append((local_idx, future))
+                self._submit_vlm(
+                    rally_local_idx=len(self.rally_results) - 1,
+                    last_contact=group_contacts[-1],
+                    next_start=next_start,
+                )
 
         # 清理 rally 狀態
         self._rally_start = -1
@@ -419,13 +383,39 @@ class FrameBuffer:
         self, slot: FrameSlot, widx: int,
         contact_segments=None,
     ) -> None:
-        """統一繪製 court + skeleton + ball trail → write to encoder。"""       
-        draw_court(slot.frame, slot.court_pts)   
-        draw_skeleton(slot.frame, slot.top, slot.bot)
+        """統一繪製 court + skeleton + ball trail → write to encoder。"""
+        if slot.court_pts is not None:
+            draw_court(slot.frame, slot.court_pts)
+        top = self._all_top[widx] if widx < len(self._all_top) else None
+        bot = self._all_bot[widx] if widx < len(self._all_bot) else None
+        draw_skeleton(slot.frame, top, bot)
 
-        draw_ball_trail(slot.frame, widx, self._ball.all_positions, self._ball.max_trail_jump,
-                        self._pos.ball_owner, fps=self._fps, contact_segments=contact_segments)
+        draw_ball_trail(slot.frame, widx, self._all_ball, self._ball.max_interp_jump,
+                        self._ball_owner, fps=self._fps, contact_segments=contact_segments)
+        self._thumbs.save_rendered(slot.frame, widx)
         self._pipe.write(slot.frame)
+
+    # ── internal: VLM submission ──────────────────────────────────────────────
+
+    def _submit_vlm(self, rally_local_idx: int, last_contact: int,
+                    next_start: Optional[int]) -> None:
+        """封裝 VLM future 提交，避免 closure 在 _flush_rally 中捕獲過多變數。"""
+        lf   = get_log_file()
+        tdir = self._thumb_dir
+        fps  = self._fps
+        vcfg = self._vllm_cfg
+
+        def _task(lf=lf, c=last_contact, n=next_start, td=tdir, fps=fps, vc=vcfg):
+            if lf:
+                set_log_file(lf)
+            try:
+                return verify_rally_winner(c, n, td, fps, vc)
+            finally:
+                if lf:
+                    clear_log_file()
+
+        future = self._vlm_executor.submit(_task)
+        self._vlm_futures.append((rally_local_idx, future))
 
     # ── internal: VLM outcome fill ────────────────────────────────────────────
 
@@ -450,8 +440,8 @@ class FrameBuffer:
                     rally["outcome"]["winner_land"] = find_winner_landing(
                         winner, contacts,
                         [b["frame"] for b in rally["bounces"]],
-                        self._ball.all_positions,
-                        None, len(self._ball.all_positions),
+                        self._all_ball,
+                        None, len(self._all_ball),
                         H, self._fps)
         else:
             cut_near = any(

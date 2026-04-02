@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from .constants import WINDOW_SEC  # 跨模組共用，定義於 constants.py
+from .constants import WINDOW_SEC, MAX_BALL_SPEED_KMH, COLOR_TOP as _COLOR_TOP, COLOR_BOTTOM as _COLOR_BOTTOM, GRADIENT_HALF_SEC as _GRADIENT_HALF_SEC  # 跨模組共用
 from .court import CourtPoints  # 僅用於 detect() 的型別標注
 
 
@@ -41,11 +41,20 @@ STATIC_BLACKLIST_TTL_SEC = 3.0  # 黑名單存活秒數
 # ── 場地中線標記過濾 ────────────────────────────────────────────────────────
 CENTER_LINE_RADIUS_RATIO = 0.015  # 中線排除半徑佔畫面對角線比例
 
+# ── 軌跡 / 插值長度 ─────────────────────────────────────────────────────────
+TRAIL_SEC              = 1.0   # 繪製軌跡長度（秒）
+OUTLIER_NEIGHBOR_SEC   = 0.2   # 離群點過濾鄰居搜尋範圍（秒）
+
+# ── 預算平方距離常數（避免每幀 sqrt）────────────────────────────────────────
+_BL_R2 = STATIC_BLACKLIST_RADIUS ** 2
+_STUCK_DIST2 = STUCK_DIST_THRESHOLD ** 2
+
 
 class BallTracker:
     """跨幀球追蹤狀態（黑名單 + stuck 偵測 + 位置歷史 + finalize）"""
 
-    def __init__(self, width: int = 0, height: int = 0, fps: float = 30.0) -> None:
+    def __init__(self, model, width: int = 0, height: int = 0, fps: float = 30.0) -> None:
+        self.model = model
         self.last_center: Optional[Tuple[float, float]] = None
         self.stuck_count: int = 0
         self.miss_count: int = 0
@@ -55,17 +64,25 @@ class BallTracker:
         self._reacq_countdown: int = 0
         # 位置歷史
         self.all_positions: List[Optional[Tuple[float, float]]] = []
-        self.max_trail_jump: float = (
+        # max_interp_jump：物理速度上限推算，用於 finalize 離群過濾 + 繪製軌跡
+        self.max_interp_jump: float = (
             compute_max_trail_jump(width, height, fps) if width > 0 else 0.0
         )
+        # _finalized_idx：上次 finalize 完成的幀號（內部進度，不再由外部傳入）
+        self._finalized_idx: int = -1
         # fps 動態換算幀數
         self._fps = fps
         self._miss_reset_frames = max(1, int(MISS_RESET_SEC * fps))
         self._reacq_max_frames = max(1, int(REACQ_MAX_SEC * fps))
         self._stuck_frames_limit = max(1, int(STUCK_SEC_LIMIT * fps))
         self._blacklist_ttl = max(1, int(STATIC_BLACKLIST_TTL_SEC * fps))
+        # 預算固定幾何量（每幀節省重複計算）
+        self._diag: float = math.hypot(width, height) if width > 0 else 0.0
+        # _detect_max_jump：即時偵測距離上限（較寬鬆，對角線 × ratio）
+        self._detect_max_jump: float = self._diag * MAX_JUMP_RATIO
+        self._reacq_jump: float = self._diag * REACQ_JUMP_RATIO
         self._center_line_radius: float = (
-            math.hypot(width, height) * CENTER_LINE_RADIUS_RATIO if width > 0 else 20.0
+            self._diag * CENTER_LINE_RADIUS_RATIO if width > 0 else 20.0
         )
 
     def reset(self) -> None:
@@ -74,6 +91,7 @@ class BallTracker:
         self.miss_count = 0
         self._pre_reset_center = None
         self._reacq_countdown = 0
+        self._blacklist.clear()  # 場景切換後舊黑名單座標已無效
 
     def _on_miss(self) -> None:
         """未偵測到球的統一處理。"""
@@ -83,38 +101,77 @@ class BallTracker:
             self._reacq_countdown = self._reacq_max_frames
             self.last_center = None
             self.miss_count = 0
-        return None
 
-    def append_position(self, box: Optional[list]) -> None:
-        """從 detect 結果提取中心點並累計到 all_positions。"""
+    def append_none(self) -> None:
+        """場地偵測失敗幀填 None，與 pose.append_none() 同步呼叫。"""
+        self.all_positions.append(None)
+
+    @property
+    def finalized_idx(self) -> int:
+        """上次 finalize 完成的幀號；buffer 在呼叫 finalize() 前讀取以取得 prev_final。"""
+        return self._finalized_idx
+
+    def finalize(
+        self,
+        positions: List[Optional[Tuple[float, float]]],
+        write_idx: int,
+        prev_final: int,
+        scene_cut_set: set,
+        ball_max_gap: int = 30,
+    ) -> None:
+        """滑動窗口處理：球離群過濾 + 插值（含方向一致性檢查）。
+        positions: 外部球位置列表（buffer._all_ball），原地寫回。
+        prev_final: 上次 finalize 完成的幀號。"""
+        max_jump = self.max_interp_jump
+        fps = self._fps
+        trail_len = max(1, int(TRAIL_SEC * fps))
+        win_frames = max(1, int(WINDOW_SEC * fps))
+
+        # 離群過濾窗口：往前取 trail_len 幀確保跨窗口的假陽性也能被過濾掉
+        start = max(0, write_idx - trail_len + 1)
+        end = min(len(positions), write_idx + win_frames + 1)
+
+        # 對窗口做副本過濾，再將 prev_final 之後的結果寫回原始列表
+        window_slice = list(positions[start:end])
+        cleaned = filter_outliers(window_slice, max_jump, fps=fps)
+        for i, val in enumerate(cleaned):
+            abs_i = start + i
+            if abs_i > prev_final and abs_i <= write_idx:  # 只更新尚未 finalize 的幀
+                if positions[abs_i] is not None and val is None:
+                    old = positions[abs_i]
+                    print(f"  [ball-rm] f={abs_i} t={abs_i/fps:.2f}s "
+                          f"({old[0]:.0f},{old[1]:.0f}) removed by outlier filter")
+                positions[abs_i] = val
+
+        # 對 prev_final+1 到 write_idx 的缺失段做線性插值
+        interp_start = max(0, prev_final + 1)
+        interpolate_gaps(positions, interp_start, write_idx, end,
+                         scene_cut_set, ball_max_gap,
+                         max_jump_per_frame=max_jump)
+
+        # 進度由外部 buffer._finalized_idx 管理
+
+    def detect(
+        self,
+        frame: np.ndarray,
+        img_h: int,
+        frame_idx: int,
+        court_pts: Optional[CourtPoints] = None,
+    ) -> Optional[Tuple[float, float]]:
+        """單幀偵測並自動 append 到 all_positions，回傳 (cx, cy) 或 None。"""
+        box = self._detect_inner(frame, img_h, frame_idx, court_pts)
         if box:
             cx = (box[0] + box[2]) / 2
             cy = (box[1] + box[3]) / 2
             self.all_positions.append((cx, cy))
+            return (cx, cy)
         else:
             self.all_positions.append(None)
+            return None
 
-    def append_none(self) -> None:
-        """過場幀填 None。"""
-        self.all_positions.append(None)
-
-    def finalize(
+    def _detect_inner(
         self,
-        write_idx: int,
-        scene_cut_set: set,
-        finalized: List[int],
-    ) -> None:
-        """滑動窗口處理：ball filter + interp（僅球，不處理球員/手腕）。"""
-        process_window(
-            write_idx, self.max_trail_jump, scene_cut_set, finalized,
-            self.all_positions, [], fps=self._fps,
-        )
-
-    def detect(
-        self,
-        model,
         frame: np.ndarray,
-        img_w: int,
         img_h: int,
         frame_idx: int,
         court_pts: Optional[CourtPoints] = None,
@@ -128,7 +185,7 @@ class BallTracker:
             (x, y, e) for x, y, e in self._blacklist if e > frame_idx
         ]
 
-        results = model.predict(source=frame, imgsz=1280, conf=0.1, verbose=False, half=True)
+        results = self.model.predict(source=frame, imgsz=1280, conf=0.1, verbose=False, half=True)
         ball_r = results[0] if results else None
         if ball_r is None:
             self._on_miss()
@@ -144,20 +201,20 @@ class BallTracker:
 
         for box, conf in zip(bx_list, conf_list):         
             # 排除畫面極端邊緣的誤偵測
-            _, y1, _, y2 = box[:4]
-            cy = (y1 + y2) / 2
+            cy = (box[1] + box[3]) / 2
             if cy < img_h * 0.05 or cy > img_h * 0.98:
                 rejected_geom += 1
                 continue
-            
-            gc = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+
+            gx = (box[0] + box[2]) / 2
+            gy = cy
             if any(
-                math.hypot(gc[0] - bx, gc[1] - by) < STATIC_BLACKLIST_RADIUS
+                (gx - bx) * (gx - bx) + (gy - by) * (gy - by) < _BL_R2
                 for bx, by, _ in self._blacklist
             ):
                 rejected_bl += 1
                 continue
-            cands.append((box, conf, gc))
+            cands.append((box, conf, (gx, gy)))
 
         if not cands:
             self._on_miss()
@@ -167,7 +224,7 @@ class BallTracker:
             return None
 
         # 有上一幀位置時，只選跳躍距離合理的候選
-        max_jump = math.hypot(img_w, img_h) * MAX_JUMP_RATIO
+        max_jump = self._detect_max_jump
         if self.last_center:
             lx, ly = self.last_center
             near = [(b, c, g) for b, c, g in cands
@@ -183,7 +240,7 @@ class BallTracker:
             # 重捕獲模式：用寬鬆距離限制，避免抓到遠端假陽性
             self._reacq_countdown -= 1
             lx, ly = self._pre_reset_center
-            reacq_jump = math.hypot(img_w, img_h) * REACQ_JUMP_RATIO
+            reacq_jump = self._reacq_jump
             near = [(b, c, g) for b, c, g in cands
                     if math.hypot(g[0] - lx, g[1] - ly) < reacq_jump]
             if near:
@@ -220,13 +277,14 @@ class BallTracker:
         self.miss_count = 0
         self._pre_reset_center = None
         self._reacq_countdown = 0
+
         chosen_box, chosen_conf, (cbx, cby) = max(cands, key=lambda c: c[1])
 
-        # stuck 偵測
+        # stuck 偵測（平方距離）
         if (
             self.last_center
-            and math.hypot(cbx - self.last_center[0], cby - self.last_center[1])
-            < STUCK_DIST_THRESHOLD
+            and (cbx - self.last_center[0]) ** 2 + (cby - self.last_center[1]) ** 2
+            < _STUCK_DIST2
         ):
             self.stuck_count += 1
         else:
@@ -257,21 +315,16 @@ class BallTracker:
 # ── 球速上限跳躍距離 ────────────────────────────────────────────────────────
 
 _COURT_DIAG_M = math.hypot(23.77, 10.97)  # ~26.18m
-TRAIL_SEC = 1.0  # 軌跡長度（秒）
-
-from .constants import COLOR_TOP as _COLOR_TOP, COLOR_BOTTOM as _COLOR_BOTTOM, GRADIENT_HALF_SEC as _GRADIENT_HALF_SEC
 
 def compute_max_trail_jump(width: int, height: int, fps: float) -> float:
-    """根據最大球速 280km/h 計算每幀最大合理像素位移，留 30% 餘量。"""
+    """根據最大球速（MAX_BALL_SPEED_KMH）計算每幀最大合理像素位移，留 30% 餘量。"""
     diag = math.hypot(width, height)
     px_per_m = diag / _COURT_DIAG_M
-    max_speed_m_per_frame = (280.0 / 3.6) / max(fps, 1.0)
+    max_speed_m_per_frame = (MAX_BALL_SPEED_KMH / 3.6) / max(fps, 1.0)
     return max_speed_m_per_frame * px_per_m * 1.3
 
 
 # ── 離群點過濾 ──────────────────────────────────────────────────────────────
-
-OUTLIER_NEIGHBOR_SEC = 0.2  # 離群點過濾鄰居搜尋範圍（秒）
 
 def _filter_outliers_pass(
     positions: List[Optional[Tuple[float, float]]],
@@ -360,19 +413,19 @@ def filter_outliers(
 
 # ── 滑動窗口處理（過濾 + 插值，原地寫回）─────────────────────────────────
 
-def _interpolate_gaps(
+def interpolate_gaps(
     positions: List[Optional[Tuple[float, float]]],
     interp_start: int,
     write_idx: int,
     end: int,
     scene_cut_set: set,
     max_gap: int,
-    check_direction: bool = False,
+    check_direction: bool = True,
     max_jump_per_frame: float = 0.0,
 ) -> None:
-    """對 positions[interp_start..write_idx] 的缺失段做線性插值，原地寫回。
-    check_direction=True 時，gap 前後 vy 反轉則不插值（球軌跡用）。
-    max_jump_per_frame>0 時，每幀平均位移超過此值則不插值（防止跨場插值）。"""
+    """線性插值填補球軌跡缺口。
+    check_direction=True 時（球軌跡），gap 前動量與插值方向相反則跳過。
+    max_jump_per_frame>0 時，每幀平均位移超過此值則跳過。"""
     i = interp_start
     while i <= write_idx:
         if positions[i] is not None:
@@ -396,25 +449,21 @@ def _interpolate_gaps(
             continue
         p0 = positions[prev_i]
         p1 = positions[next_i]
-        # 距離檢查：每幀平均位移不得超過物理極限
         if max_jump_per_frame > 0:
             dist = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
             if dist / gap > max_jump_per_frame:
                 i = next_i
                 continue
-        # 方向一致性檢查（僅球軌跡）
         if check_direction and prev_i >= 1 and positions[prev_i - 1] is not None:
             mom_dx = p0[0] - positions[prev_i - 1][0]
             mom_dy = p0[1] - positions[prev_i - 1][1]
             interp_dx = p1[0] - p0[0]
             interp_dy = p1[1] - p0[1]
             interp_dist = math.hypot(interp_dx, interp_dy)
-            # gap 前動量與插值方向相反 + 距離顯著 → 假陽性，不插值
             dot = mom_dx * interp_dx + mom_dy * interp_dy
             if dot < 0 and interp_dist > max_jump_per_frame:
                 i = next_i
                 continue
-            # 原有檢查：gap 前後 vy 反轉
             if next_i + 1 < len(positions) and positions[next_i + 1] is not None:
                 vy_after = positions[next_i + 1][1] - p1[1]
                 if mom_dy * vy_after < 0 and abs(mom_dy) > 1 and abs(vy_after) > 1:
@@ -429,74 +478,6 @@ def _interpolate_gaps(
                 )
         i = next_i
 
-
-def process_window(
-    write_idx: int,
-    max_jump: float,
-    scene_cut_set: set,
-    finalized_up_to: List[int],
-    ball_positions: List[Optional[Tuple[float, float]]],
-    extra_positions: List[List[Optional[Tuple[float, float]]]],
-    fps: float = 30.0,
-    ball_max_gap: int = 30,
-    extra_max_gap: int = 15,
-) -> None:
-    """滑動窗口統一處理：球做過濾+插值（含方向檢查），人/手腕只做插值。
-
-    所有位置列表共用同一個 finalized_up_to，每幀定案一次。
-    extra_positions: [player_top, player_bottom, wrist_top, wrist_bottom] 等。
-    """
-    trail_len = max(1, int(TRAIL_SEC * fps))
-    win_frames = max(1, int(WINDOW_SEC * fps))
-    prev_final = finalized_up_to[0]
-    start = max(0, write_idx - trail_len + 1)
-    end = min(len(ball_positions), write_idx + win_frames + 1)
-
-    # ── 球：過濾 + 插值 ──────────────────────────────────────────────
-    window_slice = list(ball_positions[start:end])
-    cleaned = filter_outliers(window_slice, max_jump, fps=fps)
-    for i, val in enumerate(cleaned):
-        abs_i = start + i
-        if abs_i > prev_final and abs_i <= write_idx:
-            if ball_positions[abs_i] is not None and val is None:
-                old = ball_positions[abs_i]
-                print(f"  [ball-rm] f={abs_i} t={abs_i/fps:.2f}s "
-                      f"({old[0]:.0f},{old[1]:.0f}) removed by outlier filter")
-            ball_positions[abs_i] = val
-
-    interp_start = max(0, prev_final + 1)
-    _interpolate_gaps(ball_positions, interp_start, write_idx, end,
-                      scene_cut_set, ball_max_gap, check_direction=True,
-                      max_jump_per_frame=max_jump)
-
-    # ── 人 / 手腕：只做插值 ──────────────────────────────────────────
-    for pos_list in extra_positions:
-        end_ex = min(len(pos_list), write_idx + win_frames + 1)
-        _interpolate_gaps(pos_list, interp_start, write_idx, end_ex,
-                          scene_cut_set, extra_max_gap, check_direction=False)
-
-    finalized_up_to[0] = write_idx
-
-
-def finalize_extras(
-    write_idx: int,
-    prev_final: int,
-    fps: float,
-    scene_cut_set: set,
-    extra_positions: List[List[Optional[Tuple[float, float]]]],
-    extra_max_gap: int = 15,
-) -> None:
-    """球員/手腕位置插值（與球的 finalize 分離，由 FrameBuffer 獨立呼叫）。
-
-    prev_final：呼叫 BallTracker.finalize() 之前的 finalized_up_to[0]，
-    確保插值起點與球的 finalize 一致。
-    """
-    win_frames = max(1, int(WINDOW_SEC * fps))
-    interp_start = max(0, prev_final + 1)
-    for pos_list in extra_positions:
-        end_ex = min(len(pos_list), write_idx + win_frames + 1)
-        _interpolate_gaps(pos_list, interp_start, write_idx, end_ex,
-                          scene_cut_set, extra_max_gap, check_direction=False)
 
 
 # ── 球軌跡繪製 ──────────────────────────────────────────────────────────────
@@ -544,22 +525,19 @@ def draw_ball_trail(
     if not trail:
         return
 
-    # ── contact_segments 路徑（flush 回合幀）──────────────────────────
+    # ── 建立顏色函式（contact_segments 優先，fallback 用 all_ball_owner）──
     if contact_segments:
+        # 回合幀：依擊球段 owner 決定顏色，切換點附近做漸層
         grad_pts = max(1, int(_GRADIENT_HALF_SEC * fps))
-
-        # 預計算每個 trail 點的 owner + 找 transition 在 trail 中的位置
         owners = [_seg_owner(fi, contact_segments) for fi, _ in trail]
-        # transition 在 trail 中的索引
-        trans_indices: List[int] = []
-        for k in range(1, len(owners)):
-            if owners[k] != owners[k - 1]:
-                trans_indices.append(k)
+        trans_indices: List[int] = [
+            k for k in range(1, len(owners)) if owners[k] != owners[k - 1]
+        ]
 
-        def _color_seg(k: int) -> Tuple[int, int, int]:
+        def _color(k: int) -> Tuple[int, int, int]:
             base = _COLOR_TOP if owners[k] == "top" else _COLOR_BOTTOM
             for ti in trans_indices:
-                d = k - ti  # trail 點距離（插值後的幀數）
+                d = k - ti
                 if -grad_pts <= d <= grad_pts:
                     old_c = _COLOR_TOP if owners[ti - 1] == "top" else _COLOR_BOTTOM
                     new_c = _COLOR_TOP if owners[ti] == "top" else _COLOR_BOTTOM
@@ -567,37 +545,28 @@ def draw_ball_trail(
                     return _blend(old_c, new_c, t)
             return base
 
-        for k in range(len(trail) - 1):
-            _, p1 = trail[k]
-            _, p2 = trail[k + 1]
-            if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > max_jump:
-                continue
-            cv2.line(frame, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])),
-                     _color_seg(k + 1), 2, cv2.LINE_AA)
+        def _color_by_fi(k: int, fi: int) -> Tuple[int, int, int]:
+            return _color(k)
 
-        last_fi, last_p = trail[-1]
-        cv2.circle(frame, (int(last_p[0]), int(last_p[1])), 5,
-                   _color_seg(len(trail) - 1), -1)
-        return
-
-    # ── fallback: all_ball_owner 路徑（非回合幀）──────────────────────
-    if all_ball_owner is not None:
-        def _fb_color(fi: int) -> Tuple[int, int, int]:
+    elif all_ball_owner is not None:
+        # 非回合幀：用 ball_owner 列表查顏色
+        def _color_by_fi(k: int, fi: int) -> Tuple[int, int, int]:
             owner = all_ball_owner[fi] if fi < len(all_ball_owner) else None
             return _COLOR_TOP if owner == "top" else _COLOR_BOTTOM
     else:
-        def _fb_color(fi: int) -> Tuple[int, int, int]:
+        def _color_by_fi(k: int, fi: int) -> Tuple[int, int, int]:
             return _COLOR_BOTTOM
 
+    # ── 統一繪製迴圈 ──────────────────────────────────────────────────
     for k in range(len(trail) - 1):
         fi1, p1 = trail[k]
         fi2, p2 = trail[k + 1]
         if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > max_jump:
             continue
         cv2.line(frame, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])),
-                 _fb_color(fi2), 2, cv2.LINE_AA)
+                 _color_by_fi(k + 1, fi2), 2, cv2.LINE_AA)
 
     last_fi, last_p = trail[-1]
-    cv2.circle(frame, (int(last_p[0]), int(last_p[1])), 5, _fb_color(last_fi), -1)
-
+    cv2.circle(frame, (int(last_p[0]), int(last_p[1])), 5,
+               _color_by_fi(len(trail) - 1, last_fi), -1)
 

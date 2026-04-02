@@ -63,28 +63,11 @@ class ThumbnailWriter:
         self._thread = threading.Thread(target=self._writer_loop, daemon=True)
         self._thread.start()
 
-    def maybe_save(
-        self,
-        frame: np.ndarray,
-        idx: int,
-        court_pts,
-        top,
-        bot,
-        ball_positions,
-        max_trail_jump: float,
-    ) -> None:
-        """每 stride 幀存一張縮圖。非阻塞（除非 queue 滿）。"""
+    def save_rendered(self, frame: np.ndarray, idx: int) -> None:
+        """存已渲染幀的縮圖（不重繪）。每 stride 幀存一張。"""
         if idx % self.stride != 0:
             return
-        thumb = frame.copy()
-        
-        draw_court(thumb, court_pts)   
-        draw_skeleton(thumb, top, bot)
-
-        draw_ball_trail(thumb, idx, ball_positions, max_trail_jump,
-                        None, fps=self._fps, contact_segments=None)
-        
-        small = cv2.resize(thumb, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
+        small = cv2.resize(frame, (THUMB_W, THUMB_H), interpolation=cv2.INTER_LINEAR)
         self._queue.put((small, self.thumb_dir / f"frame_{idx:06d}.jpg"))
 
     def close(self) -> None:

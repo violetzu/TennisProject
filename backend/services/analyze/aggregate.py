@@ -12,20 +12,17 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from .constants import MIN_BALL_SPEED_KMH
 from .court import project_to_world
 from .analysis import (
     assign_court_side, bounce_zone, find_serve_index,
-    find_winner_landing, player_court_zone,
+    find_winner_landing, player_court_zone, get_speed_after,
 )
+from .player import PlayerDetection
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 內部工具
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _normalize_pos(pos: Tuple[float, float], width: int, height: int) -> Tuple[float, float]:
-    return round(pos[0] / width, 4), round(pos[1] / height, 4)
 
 
 def _empty_player_stats() -> Dict:
@@ -48,23 +45,104 @@ def _speed_stats(speeds: List[float]) -> Dict:
     }
 
 
-SPEED_LOOK_AHEAD_SEC = 0.4  # 擊球後找球速峰值的時間窗口
 
-def _get_speed_after(
-    frame_idx: int,
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 單拍屬性計算
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_shot(
+    seq: int,
+    fi: int,
+    pos_interp: List[Optional[Tuple[float, float]]],
     smooth_speeds: List[Optional[float]],
-    look_ahead: int = 12,
-    speed_offset: int = 0,
-) -> Optional[float]:
-    adj = frame_idx - speed_offset
-    if adj < 0 or adj >= len(smooth_speeds):
+    speed_offset: int,
+    fps: float,
+    all_top: List,
+    all_bot: List,
+    last_valid_H,
+    width: int,
+    height: int,
+    vlm_shot_types: Dict[int, str],
+) -> Optional[Tuple[Dict, Dict, Optional[Dict]]]:
+    """單拍計算：屬性 + shot JSON + heatmap entry。
+
+    Returns (shot_json, hm_ball_entry, hm_player_entry) 或 None（球位置不可用）。
+    hm_player_entry 為 None 表示該拍球員位置無資料。
+    """
+    ball_pos = pos_interp[fi] if fi < len(pos_interp) else None
+    if ball_pos is None:
         return None
-    peaks = [
-        smooth_speeds[j]
-        for j in range(adj, min(adj + look_ahead, len(smooth_speeds)))
-        if smooth_speeds[j] is not None and smooth_speeds[j] >= MIN_BALL_SPEED_KMH
-    ]
-    return round(max(peaks), 1) if peaks else None
+
+    is_serve = (seq == 0)
+    player = assign_court_side(fi, pos_interp, all_top, all_bot, last_valid_H, height)
+    shot_type = "serve" if is_serve else vlm_shot_types.get(fi, "unknown")
+    speed = get_speed_after(fi, smooth_speeds, fps, speed_offset=speed_offset)
+
+    x_norm = round(ball_pos[0] / width, 4)
+    y_norm = round(ball_pos[1] / height, 4)
+
+    p_det = (all_top[fi] if fi < len(all_top) else None) if player == "top" else \
+            (all_bot[fi] if fi < len(all_bot) else None)
+    ppos = p_det.pos if p_det else None
+    player_pos: Optional[Dict] = None
+    ppx, ppy = 0.0, 0.0
+    if ppos:
+        ppx = round(ppos[0] / width, 4)
+        ppy = round(ppos[1] / height, 4)
+        player_pos = {"x": ppx, "y": ppy}
+
+    ball_world = (project_to_world(ball_pos, last_valid_H)
+                  if last_valid_H is not None else None)
+    player_world = (project_to_world(ppos, last_valid_H)
+                    if ppos is not None and last_valid_H is not None else None)
+
+    if player_world:
+        p_zone = player_court_zone(player_world[1])
+    else:
+        dist_net = abs(y_norm - 0.5) / 0.5
+        p_zone = ("net" if dist_net < 0.17
+                  else "service" if dist_net < 0.54
+                  else "baseline")
+
+    shot: Dict = {
+        "seq": seq + 1,
+        "frame": fi,
+        "time_sec": round(fi / fps, 3),
+        "player": player,
+        "is_serve": is_serve,
+        "shot_type": shot_type,
+        "speed_kmh": speed,
+        "ball_pos": {"x": x_norm, "y": y_norm},
+        "player_pos": player_pos,
+        "player_zone": p_zone,
+    }
+    if ball_world:
+        shot["ball_world"] = {"x": round(ball_world[0], 2), "y": round(ball_world[1], 2)}
+    if player_world:
+        shot["player_world"] = {"x": round(player_world[0], 2), "y": round(player_world[1], 2)}
+
+    _spd = f"{speed:.0f}km/h" if speed is not None else "—"
+    _bp  = f"({ball_pos[0]:.0f},{ball_pos[1]:.0f})"
+    _wp  = f"({ball_world[0]:.1f},{ball_world[1]:.1f})m" if ball_world else "—"
+    print(f"  [shot#{seq+1}] f={fi} t={fi/fps:.2f}s player={player} "
+          f"type={shot_type} ball={_bp} world={_wp} speed={_spd} zone={p_zone}")
+
+    hm_ball: Dict = {"player": player}
+    if ball_world:
+        hm_ball.update(x=round(ball_world[0], 3), y=round(ball_world[1], 3), coord="world")
+    else:
+        hm_ball.update(x=x_norm, y=y_norm, coord="pixel")
+
+    hm_player: Optional[Dict] = None
+    if ppos:
+        if player_world:
+            hm_player = {"x": round(player_world[0], 3),
+                         "y": round(player_world[1], 3), "coord": "world"}
+        else:
+            hm_player = {"x": ppx, "y": ppy, "coord": "pixel"}
+
+    return shot, hm_ball, hm_player
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,8 +157,8 @@ def build_single_rally(
     pos_interp: List[Optional[Tuple[float, float]]],
     smooth_speeds: List[Optional[float]],
     speed_offset: int = 0,
-    all_player_top: List[Optional[Tuple[float, float]]],
-    all_player_bottom: List[Optional[Tuple[float, float]]],
+    all_top: List[Optional[PlayerDetection]],
+    all_bot: List[Optional[PlayerDetection]],
     scene_cut_frames: List[int],
     vlm_shot_types: Dict[int, str],
     last_valid_H: Optional,
@@ -97,17 +175,9 @@ def build_single_rally(
         stats 包含: player_stats 增量、speed lists、heatmap entries、depth counts
     """
 
-    def _pn(pos: Tuple[float, float]) -> Tuple[float, float]:
-        return _normalize_pos(pos, width, height)
-
-    def _side(fi: int) -> str:
-        return assign_court_side(
-            fi, pos_interp, all_player_top, all_player_bottom,
-            last_valid_H, height)
-
     # ── 發球偵測 ──────────────────────────────────────────────────────────
     serve_idx = find_serve_index(
-        rally_contacts, pos_interp, all_player_top, all_player_bottom,
+        rally_contacts, pos_interp, all_top, all_bot,
         last_valid_H, height, fps)
 
     contacts_work = list(rally_contacts[serve_idx:])
@@ -115,7 +185,8 @@ def build_single_rally(
         print(f"[SERVE] rally#{rally_idx+1} skipped {serve_idx} pre-serve event(s), "
               f"actual serve f={contacts_work[0]}({contacts_work[0]/fps:.2f}s)")
 
-    server = _side(contacts_work[0])
+    server = assign_court_side(
+        contacts_work[0], pos_interp, all_top, all_bot, last_valid_H, height)
 
     r_end_f = (next_rally_start - 1) if next_rally_start else total_frames
     rally_bounces_f = [b for b in bounces_f if contacts_work[0] <= b <= r_end_f]
@@ -142,38 +213,15 @@ def build_single_rally(
     # ── 逐拍 shots ──────────────────────────────────────────────────────
     shots_out: List[Dict] = []
     for seq, fi in enumerate(contacts_work):
-        ball_pos = pos_interp[fi] if fi < len(pos_interp) else None
-        if ball_pos is None:
+        result = _build_shot(seq, fi, pos_interp, smooth_speeds, speed_offset, fps,
+                             all_top, all_bot, last_valid_H, width, height, vlm_shot_types)
+        if result is None:
             continue
+        shot, hm_ball, hm_player = result
+        shots_out.append(shot)
 
-        player = _side(fi)
-        is_serve = (seq == 0)
-        shot_type = "serve" if is_serve else vlm_shot_types.get(fi, "unknown")
-        speed = _get_speed_after(fi, smooth_speeds,
-                                 look_ahead=max(1, int(SPEED_LOOK_AHEAD_SEC * fps)),
-                                 speed_offset=speed_offset)
-        x_norm, y_norm = _pn(ball_pos)
-
-        plist = all_player_top if player == "top" else all_player_bottom
-        ppos = plist[fi] if fi < len(plist) else None
-        player_pos: Optional[Dict] = None
-        _ppx, _ppy = 0.0, 0.0
-        if ppos:
-            _ppx, _ppy = _pn(ppos)
-            player_pos = {"x": _ppx, "y": _ppy}
-
-        ball_world = (project_to_world(ball_pos, last_valid_H)
-                      if last_valid_H is not None else None)
-        player_world = (project_to_world(ppos, last_valid_H)
-                        if ppos is not None and last_valid_H is not None else None)
-
-        if player_world:
-            p_zone = player_court_zone(player_world[1])
-        else:
-            dist_net = abs(y_norm - 0.5) / 0.5
-            p_zone = ("net" if dist_net < 0.17
-                      else "service" if dist_net < 0.54
-                      else "baseline")
+        player, is_serve = shot["player"], shot["is_serve"]
+        shot_type, speed, p_zone = shot["shot_type"], shot["speed_kmh"], shot["player_zone"]
 
         if not is_serve:
             stats["player_stats"][player]["shots"] += 1
@@ -183,47 +231,9 @@ def build_single_rally(
         if speed is not None:
             stats["all_speeds"].append(speed)
             (stats["serve_speeds"] if is_serve else stats["rally_speeds"]).append(speed)
-
-        hm_entry: Dict = {"player": player}
-        if ball_world:
-            hm_entry.update(x=round(ball_world[0], 3),
-                            y=round(ball_world[1], 3), coord="world")
-        else:
-            hm_entry.update(x=x_norm, y=y_norm, coord="pixel")
-        stats["heatmap_contacts"].append(hm_entry)
-
-        if ppos:
-            bucket = stats["heatmap_top"] if player == "top" else stats["heatmap_bot"]
-            if player_world:
-                bucket.append({"x": round(player_world[0], 3),
-                               "y": round(player_world[1], 3), "coord": "world"})
-            else:
-                bucket.append({"x": _ppx, "y": _ppy, "coord": "pixel"})
-
-        shot: Dict = {
-            "seq": seq + 1,
-            "frame": fi,
-            "time_sec": round(fi / fps, 3),
-            "player": player,
-            "is_serve": is_serve,
-            "shot_type": shot_type,
-            "speed_kmh": speed,
-            "ball_pos": {"x": x_norm, "y": y_norm},
-            "player_pos": player_pos,
-            "player_zone": p_zone,
-        }
-        if ball_world:
-            shot["ball_world"] = {"x": round(ball_world[0], 2),
-                                  "y": round(ball_world[1], 2)}
-        if player_world:
-            shot["player_world"] = {"x": round(player_world[0], 2),
-                                    "y": round(player_world[1], 2)}
-        shots_out.append(shot)
-        _spd = f"{speed:.0f}km/h" if speed is not None else "—"
-        _bp = f"({ball_pos[0]:.0f},{ball_pos[1]:.0f})"
-        _wp = f"({ball_world[0]:.1f},{ball_world[1]:.1f})m" if ball_world else "—"
-        print(f"  [shot#{seq+1}] f={fi} t={fi/fps:.2f}s player={player} "
-              f"type={shot_type} ball={_bp} world={_wp} speed={_spd} zone={p_zone}")
+        stats["heatmap_contacts"].append(hm_ball)
+        if hm_player:
+            (stats["heatmap_top"] if player == "top" else stats["heatmap_bot"]).append(hm_player)
 
     # ── bounces ──────────────────────────────────────────────────────────
     bounces_out: List[Dict] = []
@@ -231,7 +241,8 @@ def build_single_rally(
         bpos = pos_interp[bf] if bf < len(pos_interp) else None
         if bpos is None:
             continue
-        x_n, y_n = _pn(bpos)
+        x_n = round(bpos[0] / width, 4)
+        y_n = round(bpos[1] / height, 4)
         b_world = (project_to_world(bpos, last_valid_H)
                    if last_valid_H is not None else None)
         b_entry: Dict = {

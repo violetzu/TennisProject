@@ -6,11 +6,10 @@
 
   - VideoPipe      → video_io.py   (FFmpeg decode/encode)
   - CourtDetector  → court.py      (場地偵測 + 場景切換)
-  - PoseDetector   → player.py     (姿態偵測)
-  - BallTracker    → ball.py       (球偵測 + 位置歷史)
+  - PoseDetector   → player.py     (姿態偵測 + 骨架插值)
+  - BallTracker    → ball.py       (球偵測 + 軌跡插值)
   - FrameBuffer    → buffer.py     (滑動窗口 + 回合 buffer + 分析)
   - ThumbnailWriter→ vlm_verify.py (非同步縮圖)
-  - PositionStore  → buffer.py     (球員/手腕位置累計)
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from .constants import WINDOW_SEC
 from .court import CourtDetectior
 from ._log import set_log_file, clear_log_file
 from .player import PoseDetector
-from .buffer import FrameBuffer, FrameSlot, PositionStore
+from .buffer import FrameBuffer, FrameSlot
 from .video_io import VideoPipe
 from .vlm_verify import ThumbnailWriter
 from config import VLLM
@@ -71,15 +70,11 @@ def analyze(
     out_video = data_path / "analysis.mp4"
     out_json  = data_path / "analysis.json"
     log_path  = data_path / "analysis.log"
-    thumb_dir = data_path / "thumbs"
-    thumb_dir.mkdir(exist_ok=True)
-
     # ── 元件初始化 ────────────────────────────────────────────────────────────
     court = CourtDetectior(court_model)
     pose = PoseDetector(pose_model)
-    ball = BallTracker(width, height, fps)
-    positions = PositionStore()
-    thumbs = ThumbnailWriter(thumb_dir, fps=fps)
+    ball = BallTracker(ball_model, width, height, fps)
+    thumbs = ThumbnailWriter(data_path / "thumbs", fps=fps)
 
     idx = 0
     t0_total = time.perf_counter()
@@ -96,7 +91,7 @@ def analyze(
             with VideoPipe(vpath, out_video, width, height, fps) as pipe:
                 buf = FrameBuffer(
                     max(1, int(WINDOW_SEC * fps)), fps, width, height, pipe,
-                    ball, positions, court, thumb_dir, VLLM,
+                    ball, pose, court, thumbs, VLLM,
                 )
 
                 # ── 主迴圈 ────────────────────────────────────────────────────
@@ -107,28 +102,14 @@ def analyze(
                     if court_pts is None:
                         if idx in court.scene_cut_set:
                             ball.reset()
-                        ball.append_none()
-                        positions.append_none()
-                        buf.push(FrameSlot(frame, False, None, None, None))
-                        if progress_cb and total_frames:
-                            progress_cb(min(int(idx * 95 / total_frames), 94), 100)
-                        continue
-
-                    # Pose + Ball 推論
-                    top, bot = pose.detect(frame, height, court_pts, idx)
-                    box = ball.detect(ball_model, frame, width, height, idx, court_pts)
-
-                    positions.append(top, bot)
-                    ball.append_position(box)
-
-                    # 縮圖（非同步寫入）
-                    thumbs.maybe_save(
-                        frame, idx, court_pts, top, bot,
-                        ball.all_positions, ball.max_trail_jump,
-                    )
+                        top, bot, ball_pos = None, None, None
+                    else:
+                        # Pose + Ball 推論
+                        top, bot = pose.detect(frame, height, idx, court_pts)
+                        ball_pos = ball.detect(frame, height, idx, court_pts)
 
                     # 推入 buffer（滿 WINDOW 時自動 finalize + route）
-                    buf.push(FrameSlot(frame, True, top, bot, court_pts))
+                    buf.push(FrameSlot(frame, court_pts is not None, court_pts, top, bot, ball_pos))
 
                     if progress_cb and total_frames:
                         progress_cb(min(int(idx * 95 / total_frames), 94), 100)
