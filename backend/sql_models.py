@@ -43,9 +43,8 @@ class User(Base):
 class AnalysisRecord(Base):
     __tablename__ = "analysis_records"
     __table_args__ = (
-        UniqueConstraint("raw_video_path", name="uq_raw_video_path"),
+        UniqueConstraint("video_token", name="uq_video_token"),
         UniqueConstraint("guest_token", name="uq_guest_token"),
-        Index("ix_analysis_owner_deleted", "owner_id", "deleted_at"),
         Index("ix_analysis_owner_updated", "owner_id", "updated_at"),
         Index("ix_analysis_owner_created", "owner_id", "created_at"),
         Index("ix_analysis_guest_created", "guest_token", "created_at"),
@@ -65,7 +64,7 @@ class AnalysisRecord(Base):
     # 影片資訊
     # =========================
     video_name = Column(String(255), nullable=False) #原始檔名，e.g. xxx.mp4
-    raw_video_path = Column(String(500), nullable=False)  # e.g. /videos/owner_id/xxx.mp4
+    video_token = Column(String(64), nullable=False)  # 影片資料夾名稱（UUID hex），完整路徑由 config.video_folder() 重建
     ext = Column(String(10), nullable=False) # e.g. mp4
     size_bytes = Column(BigInteger, nullable=True)
 
@@ -78,7 +77,6 @@ class AnalysisRecord(Base):
     analysis_done = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    deleted_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     owner = relationship("User", back_populates="records")

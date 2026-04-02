@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import get_current_user_optional
-from config import ALLOWED_EXT
+from config import ALLOWED_EXT, video_folder
 from database import SessionLocal, get_db
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import assert_under_data_dir, build_session_snapshot, get_session_or_404, make_session_payload
@@ -35,8 +35,7 @@ class ReanalyzeRequest(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _cleanup_analysis_files(raw_video_path: str) -> None:
-    folder = Path(raw_video_path).parent
+def _cleanup_analysis_files(folder: Path) -> None:
     for name in ("analysis.mp4", "analysis.json", "analysis.log"):
         f = folder / name
         try:
@@ -56,7 +55,6 @@ def reanalyze(
 ):
     rec = db.query(AnalysisRecord).filter(
         AnalysisRecord.id == req.analysis_record_id,
-        AnalysisRecord.deleted_at.is_(None),
     ).first()
     if not rec:
         raise HTTPException(404, "紀錄不存在")
@@ -68,7 +66,7 @@ def reanalyze(
         if not req.guest_token or req.guest_token != rec.guest_token:
             raise HTTPException(403, "guest_token 錯誤或缺少")
 
-    _cleanup_analysis_files(rec.raw_video_path)
+    _cleanup_analysis_files(video_folder(rec.owner_id, rec.video_token))
 
     rec.analysis_done = False
     rec.updated_at    = datetime.now(timezone.utc)
@@ -82,7 +80,8 @@ def reanalyze(
     sess = make_session_payload(
         owner_id=rec.owner_id,
         analysis_record_id=rec.id,
-        raw_video_path=rec.raw_video_path,
+        video_token=rec.video_token,
+        ext=rec.ext,
         history=[],
     )
     request.app.state.session_store[sid] = sess
@@ -113,7 +112,8 @@ async def analyze_api(
     if rec.owner_id is not None and (not current_user or current_user.id != rec.owner_id):
         raise HTTPException(403, "無權限")
 
-    vpath = Path(rec.raw_video_path)
+    vid_folder = video_folder(rec.owner_id, rec.video_token)
+    vpath      = vid_folder / f"raw.{rec.ext}"
     if not vpath.exists():
         raise HTTPException(400, "找不到影片檔案（可能已過期清理）")
     if vpath.suffix.lower() not in ALLOWED_EXT:
@@ -143,8 +143,6 @@ async def analyze_api(
             remaining = None
         sess["eta_seconds"] = round(remaining) if remaining is not None else None
 
-    video_folder = vpath.parent  # DATA_DIR/users/{id}/{token}/ 或 DATA_DIR/guest/{token}/
-
     async def runner():
         try:
             json_path, video_path = await asyncio.to_thread(
@@ -154,7 +152,7 @@ async def analyze_api(
                 request.app.state.yolo_ball_model,
                 request.app.state.yolo_pose_model,
                 request.app.state.yolo_court_model,
-                str(video_folder),
+                str(vid_folder),
                 job_id,
                 width=rec.width,
                 height=rec.height,

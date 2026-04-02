@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import get_current_user_optional
-from config import BASE_DIR, DATA_DIR, VIDEO_URL_DOMAIN, VLLM
+from config import BASE_DIR, VIDEO_URL_DOMAIN, VLLM, video_folder
 from database import SessionLocal, get_db
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import get_session_or_404
@@ -29,8 +29,11 @@ class ChatRequest(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _to_video_url(raw_video_path: str) -> str:
-    rel = Path(raw_video_path).resolve().relative_to(DATA_DIR.resolve()).as_posix()
+def _to_video_url(owner_id: Optional[int], video_token: str, ext: str) -> str:
+    if owner_id is not None:
+        rel = f"users/{owner_id}/{video_token}/raw.{ext}"
+    else:
+        rel = f"guest/{video_token}/raw.{ext}"
     return f"{VIDEO_URL_DOMAIN}/videos/{rel}"
 
 
@@ -138,9 +141,11 @@ def _build_messages(
         messages.append({"role": "user",      "content": h.get("user",      "")})
         messages.append({"role": "assistant", "content": h.get("assistant", "")})
 
-    raw_path = sess.get("raw_video_path")
-    if not raw_path:
-        raise HTTPException(400, "session 缺少 raw_video_path")
+    video_token = sess.get("video_token")
+    ext         = sess.get("ext")
+    owner_id    = sess.get("owner_id")
+    if not video_token or not ext:
+        raise HTTPException(400, "session 缺少 video_token / ext")
 
     dur_hint = f"（影片總長度：{_fmt_duration(duration)}）" if duration and duration > 0 else ""
     text_content = f"{dur_hint}\n{question}".strip() if dur_hint else question
@@ -148,7 +153,7 @@ def _build_messages(
     messages.append({
         "role": "user",
         "content": [
-            {"type": "video_url", "video_url": {"url": _to_video_url(raw_path)}},
+            {"type": "video_url", "video_url": {"url": _to_video_url(owner_id, video_token, ext)}},
             {"type": "text",      "text": text_content},
         ],
     })
@@ -203,7 +208,7 @@ async def chat(
             if rec.duration:
                 duration = float(rec.duration)
             if rec.analysis_done:
-                json_path = Path(rec.raw_video_path).parent / "analysis.json"
+                json_path = video_folder(rec.owner_id, rec.video_token) / "analysis.json"
                 if json_path.exists():
                     analysis_context = _build_analysis_context(str(json_path))
 

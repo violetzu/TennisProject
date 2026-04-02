@@ -54,6 +54,7 @@ services:
       - .env
     volumes:
       - ./backend/:/backend/
+      - ./data/users_analytics:/data
     command: >
       uvicorn app:app --host 0.0.0.0 --port 8000 --no-access-log
       ${BACKEND_DEV_MODE:+--reload --reload-dir /backend}

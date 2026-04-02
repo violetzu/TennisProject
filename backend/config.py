@@ -4,7 +4,7 @@ import secrets
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from dotenv import load_dotenv
 
@@ -14,13 +14,20 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DATA_DIR  = BASE_DIR / "data"
+DATA_DIR  = BASE_DIR.parent / "data"
 USERS_DIR = DATA_DIR / "users"
 GUEST_DIR = DATA_DIR / "guest"
 CHUNK_DIR = DATA_DIR / "videos_chunks"
 
 for _d in (DATA_DIR, USERS_DIR, GUEST_DIR, CHUNK_DIR):
     _d.mkdir(parents=True, exist_ok=True)
+
+
+def video_folder(owner_id: Optional[int], video_token: str) -> Path:
+    """回傳影片資料夾的 Path（不建立目錄）。"""
+    if owner_id is not None:
+        return DATA_DIR / "users" / str(owner_id) / video_token
+    return DATA_DIR / "guest" / video_token
 
 # ── Media ─────────────────────────────────────────────────────────────────────
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}

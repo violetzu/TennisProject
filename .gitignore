@@ -3,6 +3,5 @@ __pycache__/
 .vscode/
 .claude/
 data/*
-backend/data/*
 backend/videos/*
 backend/test/*

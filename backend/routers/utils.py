@@ -24,7 +24,8 @@ def make_session_payload(
     *,
     owner_id: Optional[int],
     analysis_record_id: int,
-    raw_video_path: str,
+    video_token: str,
+    ext: str,
     history: list,
 ) -> Dict[str, Any]:
     return {
@@ -33,7 +34,8 @@ def make_session_payload(
         "status":             "idle",
         "progress":           0,
         "error":              None,
-        "raw_video_path":     raw_video_path,
+        "video_token":        video_token,
+        "ext":                ext,
         "history":            history,
     }
 

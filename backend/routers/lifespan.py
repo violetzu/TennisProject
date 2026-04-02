@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 
-from config import GUEST_DIR, CHUNK_DIR
+from config import GUEST_DIR, CHUNK_DIR, video_folder
 from database import SessionLocal
 from services.utils import get_yolo_models
 from sql_models import AnalysisRecord
@@ -76,8 +76,8 @@ async def _cleanup_loop() -> None:
                     .all()
                 )
                 for rec in old_recs:
-                    if rec.raw_video_path:
-                        folder = Path(rec.raw_video_path).parent
+                    if rec.video_token:
+                        folder = video_folder(rec.owner_id, rec.video_token)
                         if safe_under_data_dir(folder):
                             _remove(folder)
                     task_db.delete(rec)
