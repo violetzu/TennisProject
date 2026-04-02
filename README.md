@@ -81,9 +81,9 @@ YOLO and vLLM share the same GPU. For a 24 GB card (e.g. RTX 4090), use the 8B m
 
 ### Disk
 
-- Uploaded videos + annotated output (2× original size)
+- Uploaded videos + annotated output (`data/users_analytics/`): 2× original size per video
 - vLLM model cache (`data/huggingface/`): 5–60 GB depending on model
-- MySQL data: minimal
+- PostgreSQL data (`data/postgres/`): minimal
 
 ## Quick Start
 
@@ -105,7 +105,7 @@ cp .env.example .env
 
 | Variable | Note |
 |---|---|
-| `APP_VLLM_MODEL` | VLM model name. `Qwen/Qwen3-VL-8B-Instruct` needs ~30 GB VRAM. Try 2B/4B for smaller GPUs. |
+| `APP_VLLM_MODEL` | VLM model name. `Qwen/Qwen3.5-27B-FP8` needs ~35 GB VRAM. Try 2B/4B for smaller GPUs. |
 | `FRONTEND_DEV_MODE` | `true` = `npm run dev` with hot reload |
 | `BACKEND_DEV_MODE` | `true` = uvicorn `--reload` |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Leave empty if not exposing externally |
@@ -127,9 +127,9 @@ Open **http://localhost:3000**
 | Layer | Technology |
 |---|---|
 | Frontend | Next.js 16, React 19, Tailwind CSS v4 |
-| Backend | FastAPI, SQLAlchemy, MySQL 8.0 |
-| Detection | YOLOv8 (ball), YOLO26n-pose (player & court) |
-| VLM | Qwen3-VL via vLLM |
+| Backend | FastAPI, SQLAlchemy, PostgreSQL |
+| Detection | YOLO26 (ball), YOLO26-pose (player & court) |
+| VLM | Qwen3.5 via vLLM |
 | Video | FFmpeg pipe (decode/encode), OpenCV |
 | Deploy | Docker Compose, Cloudflare Tunnel |
 
@@ -171,5 +171,5 @@ All three detection models were custom-trained. Training scripts, dataset downlo
 
 ## Links
 
-- [Google Drive — Models & Test Videos](https://drive.google.com/drive/folders/1ttI0QDaQ6rkU-6uh9F-09ewdqgxi_HqU?usp=drive_link)
+- [Google Drive — Models & Test Videos](https://drive.google.com/drive/folders/1dw228RNFqR4jMFD7ULwvYfcMtg7ibHHI)
 - [(Guide) Ubuntu Docker + NVIDIA Container Toolkit](https://github.com/violetzu/knowledge/blob/01ecf7828174c0a082418e4410d5e8081abc7799/docker%20install.md)

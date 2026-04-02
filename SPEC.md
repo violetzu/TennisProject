@@ -30,7 +30,7 @@ TennisProject 是一個網球比賽影片分析平台，整合了以下功能：
 |---|---|
 | 前端 | Next.js 16 (React 19, TypeScript), Tailwind CSS v4 |
 | 後端 | FastAPI (Python 3.x), SQLAlchemy ORM |
-| 資料庫 | MySQL 8.0 |
+| 資料庫 | PostgreSQL 16 |
 | AI 推理 | vLLM (OpenAI 相容 API) + Qwen 多模態模型 |
 | 影片處理 | FFmpeg, decord, OpenCV, Ultralytics YOLO |
 | 部署 | Docker Compose + Cloudflare Tunnel |
@@ -44,7 +44,7 @@ TennisProject 是一個網球比賽影片分析平台，整合了以下功能：
 ```
 docker-compose.yml
 ├── vllm          (profile: vllm，選用)
-├── mysql         (必要)
+├── postgres      (必要)
 ├── backend       (必要)
 ├── frontend      (必要)
 └── cloudflared   (必要，對外 HTTPS)
@@ -77,18 +77,18 @@ command: >
 
 重點：vLLM 以 OpenAI 相容 API 形式提供服務，後端透過 `APP_VLLM_URL` 呼叫。
 
-#### mysql
+#### postgres
 
 ```yaml
-image: mysql:8.0
+image: postgres:16
 volumes:
-  - ./data/mysql:/var/lib/mysql   # 資料永久化
+  - ./data/postgres:/var/lib/postgresql/data   # 資料永久化
 healthcheck:
-  test: mysqladmin ping -h 127.0.0.1 ...
+  test: pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
   interval: 3s  retries: 30
 ```
 
-backend 的 `depends_on: mysql: condition: service_healthy` 確保 DB 就緒才啟動。
+backend 的 `depends_on: postgres: condition: service_healthy` 確保 DB 就緒才啟動。
 
 #### backend
 
@@ -139,7 +139,7 @@ frontend:3000 (Next.js)
     ├─ /api/*   → backend:8000/api/*   (Next.js rewrite)
     └─ /videos/* → backend:8000/videos/* (Next.js rewrite)
 backend:8000 (FastAPI)
-    ├─ mysql:3306
+    ├─ postgres:5432
     └─ vllm:8005 (http, 同 Docker 網路)
 ```
 
@@ -160,7 +160,7 @@ TennisProject/
 │   └── frontend.sh            # 啟動腳本（dev/prod 切換）
 │
 ├── data/
-│   ├── mysql/                 # MySQL volume（Docker 掛載）
+│   ├── postgres/              # PostgreSQL volume（Docker 掛載）
 │   └── huggingface/           # HF 模型快取（Docker 掛載）
 │
 ├── backend/
@@ -198,11 +198,17 @@ TennisProject/
 │   │   ├── person/yolo26n-pose.pt             # 姿態偵測模型（YOLO26n-pose 預訓練，17 關鍵點 COCO）
 │   │   └── court/yolo26n-pose-court-best.pt   # 場地偵測模型（YOLO26n-pose fine-tune，14 關鍵點）
 │   │
-│   ├── data/                  # 分析 JSON 輸出（analysis_{job_id}.json）
-│   └── videos/
-│       ├── _chunks/           # 暫存分塊上傳的片段（1 小時後清理）
-│       ├── guest/             # 訪客影片 + 標注影片（7 天後清理）
-│       └── users/{owner_id}/  # 登入用戶影片 + 標注影片
+│   └── (其餘程式檔)
+│
+└── data/users_analytics/      # 掛載至容器內 /data（與程式碼分離）
+    ├── users/{owner_id}/{video_token}/   # 登入用戶影片資料夾
+    │   ├── raw.{ext}          # 原始（或轉碼後）影片
+    │   ├── analysis.mp4       # YOLO 標注影片（分析完成後產生）
+    │   ├── analysis.json      # 分析結果 JSON
+    │   └── analysis.log       # 分析 log
+    ├── guest/{video_token}/   # 訪客影片資料夾（7 天後清理）
+    │   └── （同上）
+    └── videos_chunks/{upload_id}/  # 暫存分塊上傳片段（1 小時後清理）
 │
 └── frontend/
     ├── next.config.js         # rewrites（/api/*→backend），standalone output
@@ -266,20 +272,20 @@ TennisProject/
 | owner_id | INT FK → users（nullable） | NULL 表示訪客 |
 | guest_token | VARCHAR(64) UNIQUE（nullable） | 訪客存取憑證 |
 | video_name | VARCHAR(255) | 原始檔名 |
-| raw_video_path | VARCHAR(500) UNIQUE | 伺服器上的絕對路徑 |
-| ext | VARCHAR(10) | 副檔名，e.g. `mp4` |
+| video_token | VARCHAR(64) UNIQUE | 影片資料夾名稱（UUID hex），完整路徑由 `config.video_folder()` 重建 |
+| ext | VARCHAR(10) | 副檔名，e.g. `mp4`（轉碼後自動更新） |
 | size_bytes | BIGINT | 檔案大小 |
 | duration | FLOAT | 時長（秒） |
 | fps | FLOAT | 幀率 |
 | frame_count | INT | 總幀數 |
 | width, height | INT | 解析度 |
-| analysis_json_path | VARCHAR(500)（nullable） | Pipeline 輸出 world.json 路徑 |
-| yolo_video_path | VARCHAR(500)（nullable） | YOLO 標注影片路徑 |
+| analysis_done | BOOLEAN | 分析是否完成（結果檔由 video_token 路徑推算） |
 | created_at | DATETIME | |
-| updated_at | DATETIME | 每次分析完成更新 |
-| deleted_at | DATETIME（nullable） | 軟刪除時間 |
+| updated_at | DATETIME | 最後操作時間（上傳/轉碼/分析/聊天均會更新） |
 
-**索引：** `(owner_id, deleted_at)`, `(owner_id, updated_at)`, `(owner_id, created_at)`, `(guest_token, created_at)`
+**索引：** `(owner_id, updated_at)`, `(owner_id, created_at)`, `(guest_token, created_at)`
+
+**路徑重建：** `config.video_folder(owner_id, video_token)` → `DATA_DIR/users/{id}/{token}` 或 `DATA_DIR/guest/{token}`
 
 ### 4.3 analysis_messages
 
@@ -308,17 +314,23 @@ User 1─N AnalysisRecord 1─N AnalysisMessage
 - 建立 `FastAPI` 實例，掛載 `lifespan`
 - 啟動時執行 `Base.metadata.create_all()`（自動建表）
 - `app.state.session_store = {}`：in-memory session 字典，所有進行中的分析狀態存放於此
-- StaticFiles 掛載：`/videos` → `backend/videos/`（直接提供影片檔）
+- StaticFiles 掛載：`/videos` → `DATA_DIR`（直接提供影片檔）
 - CORS 全開（`allow_origins=["*"]`）
 - 掛載 4 個 Router：analyze、chat、user、video
 
 ### 5.2 config.py
 
 ```python
-BASE_DIR  = Path(__file__).resolve().parent
-VIDEO_DIR = BASE_DIR / "videos"
-CHUNK_DIR = VIDEO_DIR / "_chunks"
-GUEST_VIDEO_DIR = VIDEO_DIR / "guest"
+BASE_DIR  = Path(__file__).resolve().parent          # /backend
+DATA_DIR  = BASE_DIR.parent / "data"                 # /data（掛載自 data/users_analytics/）
+USERS_DIR = DATA_DIR / "users"
+GUEST_DIR = DATA_DIR / "guest"
+CHUNK_DIR = DATA_DIR / "videos_chunks"
+
+def video_folder(owner_id, video_token) -> Path:
+    # 路徑重建唯一入口，所有 router 均透過此函式取得影片資料夾
+    if owner_id: return DATA_DIR / "users" / str(owner_id) / video_token
+    return DATA_DIR / "guest" / video_token
 
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
@@ -356,9 +368,9 @@ OAuth2 scheme 提供兩個版本（required / optional），對應不同 endpoin
 
 | 函式 | 說明 |
 |---|---|
-| `safe_under_video_dir(p)` | 確認路徑在 VIDEO_DIR 內（防 path traversal），回傳 bool |
-| `assert_under_video_dir(p)` | 同上，失敗則 raise HTTP 400 |
-| `make_session_payload(owner_id, analysis_record_id, raw_video_path, history)` | 建立 session dict 模板（含 status/progress/error） |
+| `safe_under_data_dir(p)` | 確認路徑在 DATA_DIR 內（防 path traversal），回傳 bool |
+| `assert_under_data_dir(p)` | 同上，失敗則 raise HTTP 400 |
+| `make_session_payload(owner_id, analysis_record_id, video_token, ext, history)` | 建立 session dict 模板（含 status/progress/error） |
 | `assert_session_access(sess, current_user)` | 驗證 session 存取權（owner_id 比對） |
 | `get_session_or_404(request, session_id, current_user)` | 從 session_store 取得並驗證，不存在則 404 |
 | `build_session_snapshot(session_id, sess)` | 回傳給 `/status` 的安全快照（不含路徑） |
@@ -372,7 +384,8 @@ OAuth2 scheme 提供兩個版本（required / optional），對應不同 endpoin
     "status":             "idle" | "processing" | "completed" | "failed",
     "progress":           0–100,
     "error":              str | None,
-    "raw_video_path":     str,
+    "video_token":        str,
+    "ext":                str,
     "history":            [{"user": str, "assistant": str}, ...],
     "transcoding":        bool,  # 僅轉碼期間存在
 }
@@ -385,9 +398,8 @@ OAuth2 scheme 提供兩個版本（required / optional），對應不同 endpoin
 #### POST /api/reanalyze
 
 - 驗證 `analysis_record_id` 所有權（用戶或 guest_token）
-- 刪除 `yolo_video_path`、`analysis_json_path` 對應的檔案
-- 清空 DB 中該 record 的所有 `AnalysisMessage`
-- 將 `rec.analysis_json_path` 和 `rec.yolo_video_path` 歸 NULL
+- 刪除資料夾內的 `analysis.mp4`、`analysis.json`、`analysis.log`
+- 清空 DB 中該 record 的所有 `AnalysisMessage`，`analysis_done = False`
 - 建立新 session（`history=[]`），回傳新 `session_id`
 
 #### POST /api/analyze_combine
@@ -450,24 +462,23 @@ Content-Encoding: identity
 #### POST /api/upload_complete
 
 - 驗證所有 chunk 存在且連續
-- 合併 chunks 到目標路徑（用戶：`videos/users/{owner_id}/`；訪客：`videos/guest/`）
+- 合併 chunks 到 `video_folder(owner_id, file_token)/raw.{ext}`
 - `get_video_meta()` 取得 duration/fps/codec 等 meta
-- 寫入 DB（`AnalysisRecord`）
-- 若 codec 屬於 `{av1, vp9, vp8, theora}` → `BackgroundTasks` 呼叫 `_bg_transcode()`：
-  - ffmpeg 轉為 H.264 MP4，刪除原始檔
-  - 更新 DB `raw_video_path` / `ext` / `size_bytes`
+- 寫入 DB（`AnalysisRecord`），`video_token = file_token`
+- 若 codec 屬於 `{av1, vp9, vp8, theora, hevc, h265}` → `BackgroundTasks` 呼叫 `_bg_transcode()`：
+  - ffmpeg 轉為 H.264 MP4，刪除原始檔，重命名為 `raw.mp4`
+  - 更新 DB `ext = "mp4"` / `size_bytes`
   - 設定 `sess["transcoding"] = False`
   - session 在轉碼期間 `transcoding=True`
 - 回傳 `{session_id, analysis_record_id, guest_token, meta, video_url, transcoding}`
 
 #### POST /api/videolist
 
-- 回傳當前登入用戶的影片列表（`deleted_at IS NULL`，按 `created_at DESC`）
+- 回傳當前登入用戶的影片列表（按 `created_at DESC`）
 
 #### POST /api/delete_video
 
-- 驗證 owner → soft delete（設定 `deleted_at`）
-- 刪除 `raw_video_path`、`yolo_video_path`、`analysis_json_path` 實體檔案
+- 驗證 owner → 刪除 `video_folder()` 整個資料夾（含影片、分析結果）→ 硬刪除 DB 記錄
 
 #### POST /api/analysisrecord
 
@@ -1210,10 +1221,9 @@ if owner_id is not None:
 | `APP_VLLM_MODEL` | 模型名稱，e.g. `Qwen/Qwen3.5-27B-FP8` | backend config + vllm command |
 | `APP_VLLM_API_KEY` | vLLM API key（選用） | backend config + vllm command |
 | `VIDEO_URL_DOMAIN` | 後端組裝影片 URL 給 vLLM 用，e.g. `http://backend:8000` | backend config |
-| `MYSQL_HOST` | MySQL 主機名稱，e.g. `mysql` | backend config |
-| `MYSQL_PORT` | MySQL 埠號，預設 `3306` | backend config |
-| `MYSQL_DATABASE` | 資料庫名稱，e.g. `tennis_db` | backend config + mysql env |
-| `MYSQL_USER` | 資料庫用戶，e.g. `admin` | backend config + mysql env |
-| `MYSQL_PASSWORD` | 資料庫密碼 | backend config + mysql env |
-| `MYSQL_ROOT_PASSWORD` | MySQL root 密碼（健康檢查用） | mysql env |
+| `POSTGRES_HOST` | PostgreSQL 主機名稱，e.g. `postgres` | backend config |
+| `POSTGRES_PORT` | PostgreSQL 埠號，預設 `5432` | backend config |
+| `POSTGRES_DB` | 資料庫名稱，e.g. `tennis_db` | backend config + postgres env |
+| `POSTGRES_USER` | 資料庫用戶，e.g. `admin` | backend config + postgres env |
+| `POSTGRES_PASSWORD` | 資料庫密碼 | backend config + postgres env |
 | `SECRET_KEY` | JWT 簽名密鑰（未設定則每次啟動隨機，JWT 失效） | backend auth |
