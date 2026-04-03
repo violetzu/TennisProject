@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import math
-import shutil
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -156,9 +155,6 @@ class FrameBuffer:
             self._fill_outcome(rally_local_idx, winner)
 
         self._vlm_executor.shutdown(wait=False)
-
-        # 清理縮圖目錄
-        shutil.rmtree(self._thumb_dir, ignore_errors=True)
 
     def get_summary(self) -> Dict:
         """彙總所有回合 → summary + heatmap。"""

@@ -56,6 +56,25 @@ export default function ChatPanel({
     await send(q);
   }
 
+  function renderAssistantBubble(
+    text: string,
+    isStreamingStatus?: boolean,
+    statusPhase?: string | null
+  ) {
+    if (!isStreamingStatus) return text;
+
+    return (
+      <div className="chat-status-row" role="status" aria-live="polite" data-phase={statusPhase ?? undefined}>
+        <span className="chat-status-dots" aria-hidden="true">
+          <span className="chat-status-dot" />
+          <span className="chat-status-dot" />
+          <span className="chat-status-dot" />
+        </span>
+        <span>{text}</span>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col min-h-0">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5" ref={chatRef}>
@@ -64,7 +83,9 @@ export default function ChatPanel({
             <div className={`py-2 px-3.5 rounded-[14px] max-w-[82%] whitespace-pre-wrap break-words text-base ${
               m.role === "user" ? "bubble-user" : "bubble-assistant"
             }`}>
-              {m.text}
+              {m.role === "assistant"
+                ? renderAssistantBubble(m.text, m.isStreamingStatus, m.statusPhase)
+                : m.text}
             </div>
           </div>
         ))}

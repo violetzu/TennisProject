@@ -100,16 +100,16 @@ export function useVideoPanelController({
 
   // 狀態列文字
   const statusText = useMemo(() => {
-    if (uploadPct > 0 && uploadPct < 100) return `影片上傳中... ${uploadPct}%`;
+    if (uploadPct > 0 && uploadPct < 100) return "影片上傳中";
     if (uploadPct === 100) return "影片上傳完成，可瀏覽或開始分析";
-    if (transcoding) return `影片轉碼中... ${transcodeProgress}%`;
+    if (transcoding) return "影片轉碼中";
     if (!sessionId) return "請先上傳影片";
-    if (analysisStarting) return "綜合分析啟動中...";
-    if (status === "processing") return `綜合分析中... ${progress}%`;
+    if (analysisStarting) return "綜合分析啟動中";
+    if (status === "processing") return "綜合分析中";
     if (status === "completed") return "分析完成（按「顯示分析結果」查看）";
     if (status === "failed") return `分析失敗：${error || "未知錯誤"}`;
     return "影片已載入，可開始分析";
-  }, [uploadPct, transcoding, transcodeProgress, sessionId, analysisStarting, status, progress, error]);
+  }, [uploadPct, transcoding, sessionId, analysisStarting, status, error]);
 
   // 進度條（統一出口）
   const progressBar = (() => {
@@ -298,6 +298,11 @@ export function useVideoPanelController({
   return {
     lockAll,
     isCombineCompleted,
+    isStatusRunning:
+      (uploadPct > 0 && uploadPct < 100) ||
+      transcoding ||
+      analysisStarting ||
+      status === "processing",
     statusText,
     videoInfoText,
     progressBar,

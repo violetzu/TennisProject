@@ -28,6 +28,24 @@ services:
       ${APP_VLLM_API_KEY:+--api-key $APP_VLLM_API_KEY}
     restart: unless-stopped
 
+  vllm-embedding:
+    image: vllm/vllm-openai:nightly
+    profiles:
+      - vllm
+    gpus: all
+    ipc: host
+    expose:
+      - "8006"
+    volumes:
+      - ./data/huggingface:/root/.cache/huggingface
+    command: >
+      BAAI/bge-m3
+      --host 0.0.0.0
+      --port 8006
+      --gpu-memory-utilization 0.05
+      ${APP_VLLM_API_KEY:+--api-key $APP_VLLM_API_KEY}
+    restart: unless-stopped
+
   postgres:
     image: postgres:16
     restart: unless-stopped

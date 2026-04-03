@@ -25,11 +25,14 @@ export async function POST(req: NextRequest) {
     duplex: "half",
   });
 
+  const contentType =
+    upstream.headers.get("content-type") || "text/event-stream; charset=utf-8";
+
   // 直接把 upstream 的 ReadableStream 透傳給瀏覽器
   return new Response(upstream.body, {
     status: upstream.status,
     headers: {
-      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Type": contentType,
       "X-Accel-Buffering": "no",
       "Cache-Control": "no-cache",
     },

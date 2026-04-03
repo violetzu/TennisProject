@@ -75,6 +75,7 @@ export default function VideoPanel({
   const {
     lockAll,
     isCombineCompleted,
+    isStatusRunning,
     statusText,
     videoInfoText,
     progressBar,
@@ -187,6 +188,21 @@ export default function VideoPanel({
 
   const hasAnyVideo = Boolean(localVideoUrl || remoteVideoUrl || analysisCtx.yoloVideoUrl);
 
+  function renderStatusText(text: string, isRunning: boolean) {
+    if (!isRunning) return text;
+
+    return (
+      <span className="status-inline-row" role="status" aria-live="polite">
+        <span className="chat-status-dots" aria-hidden="true">
+          <span className="chat-status-dot" />
+          <span className="chat-status-dot" />
+          <span className="chat-status-dot" />
+        </span>
+        <span>{text}</span>
+      </span>
+    );
+  }
+
   return (
     <>
       <div className="glass px-4 pt-3.5 pb-2.5 flex flex-col gap-2.5">
@@ -238,7 +254,7 @@ export default function VideoPanel({
         </div>
 
         <div className="flex items-center text-base">
-          <span>{statusText}</span>
+          <span>{renderStatusText(statusText, isStatusRunning)}</span>
           {progressBar.show && (
             <span className="ml-auto min-w-[220px] text-right text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
               {progressBar.text}

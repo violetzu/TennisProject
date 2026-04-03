@@ -71,9 +71,22 @@ class AuthConfig:
     access_token_expire_minutes: int = 60 * 24  # 1 天
 
 
+@dataclass(frozen=True)
+class EmbeddingConfig:
+    url:     str
+    model:   str
+    api_key: Optional[str]
+
+
 VLLM = VLLMConfig(
     url     = os.getenv("APP_VLLM_URL",   "http://vllm:8005"),
     model   = os.getenv("APP_VLLM_MODEL", "Qwen/Qwen3.5-27B-FP8"),
+    api_key = os.getenv("APP_VLLM_API_KEY"),
+)
+
+EMBEDDING = EmbeddingConfig(
+    url     = os.getenv("APP_EMBEDDING_URL",   "http://vllm-embedding:8006"),
+    model   = os.getenv("APP_EMBEDDING_MODEL", "BAAI/bge-m3"),
     api_key = os.getenv("APP_VLLM_API_KEY"),
 )
 

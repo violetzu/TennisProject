@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import traceback
 import uuid
 from datetime import datetime, timezone
@@ -36,13 +37,19 @@ class ReanalyzeRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _cleanup_analysis_files(folder: Path) -> None:
-    for name in ("analysis.mp4", "analysis.json", "analysis.log"):
+    for name in ("analysis.mp4", "analysis.json", "analysis.log", "rally_embeddings.json"):
         f = folder / name
         try:
             assert_under_data_dir(f)
             f.unlink(missing_ok=True)
         except Exception:
             pass
+    thumb_dir = folder / "thumbs"
+    try:
+        assert_under_data_dir(thumb_dir)
+        shutil.rmtree(thumb_dir, ignore_errors=True)
+    except Exception:
+        pass
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

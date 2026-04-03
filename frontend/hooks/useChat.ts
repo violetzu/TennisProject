@@ -1,10 +1,21 @@
 // hooks/useChat.ts
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/apiFetch";
+import {
+  type ChatStatusPhase,
+  createChatSseParser,
+  INITIAL_CHAT_STREAM_UI_STATE,
+  reduceChatStreamUiState,
+} from "@/lib/chatSse";
 
-export type Msg = { role: "user" | "assistant"; text: string };
+export type Msg = {
+  role: "user" | "assistant";
+  text: string;
+  isStreamingStatus?: boolean;
+  statusPhase?: ChatStatusPhase | null;
+};
 export type ChatTurn = { user: string; assistant: string };
 
 function turnsToMessages(turns: ChatTurn[] | undefined | null): Msg[] {
@@ -20,21 +31,19 @@ export function useChat(sessionId: string | null) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const thinkingTimerRef = useRef<number | null>(null);
-
-  const stopThinking = useCallback(() => {
-    if (thinkingTimerRef.current) {
-      window.clearInterval(thinkingTimerRef.current);
-      thinkingTimerRef.current = null;
-    }
-  }, []);
-
-  const setLastAssistantText = useCallback((text: string) => {
+  const setLastAssistantState = useCallback((
+    next: Pick<Msg, "text" | "isStreamingStatus" | "statusPhase">
+  ) => {
     setMessages((prev) => {
       const copy = [...prev];
       for (let i = copy.length - 1; i >= 0; i--) {
         if (copy[i].role === "assistant") {
-          copy[i] = { role: "assistant", text };
+          copy[i] = {
+            role: "assistant",
+            text: next.text,
+            isStreamingStatus: next.isStreamingStatus ?? false,
+            statusPhase: next.statusPhase ?? null,
+          };
           break;
         }
       }
@@ -42,26 +51,15 @@ export function useChat(sessionId: string | null) {
     });
   }, []);
 
-  const startThinking = useCallback(() => {
-    let dots = 1;
-    setLastAssistantText("思考中.");
-    thinkingTimerRef.current = window.setInterval(() => {
-      dots = (dots % 3) + 1;
-      setLastAssistantText("思考中" + ".".repeat(dots));
-    }, 500);
-  }, [setLastAssistantText]);
-
   const hydrate = useCallback((turns: ChatTurn[]) => {
-    stopThinking();
     setBusy(false);
     setMessages(turnsToMessages(turns));
-  }, [stopThinking]);
+  }, []);
 
   const reset = useCallback(() => {
-    stopThinking();
     setBusy(false);
     setMessages([]);
-  }, [stopThinking]);
+  }, []);
 
   const send = useCallback(async (text: string) => {
     const q = text.trim();
@@ -72,12 +70,19 @@ export function useChat(sessionId: string | null) {
       return;
     }
 
-    setMessages((m) => [...m, { role: "user", text: q }, { role: "assistant", text: "" }]);
+    setMessages((m) => [
+      ...m,
+      { role: "user", text: q },
+      {
+        role: "assistant",
+        text: "正在分析問題",
+        isStreamingStatus: true,
+        statusPhase: "thinking",
+      },
+    ]);
     setBusy(true);
-    startThinking();
 
     try {
-      // apiFetch：非 2xx 自動 throw，2xx 直接回傳 response（body 未讀，streaming 正常）
       const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,52 +90,73 @@ export function useChat(sessionId: string | null) {
       });
 
       if (!res.body) {
-        stopThinking();
-        setLastAssistantText("（無回應內容）");
+        setLastAssistantState({
+          text: "（無回應內容）",
+          isStreamingStatus: false,
+          statusPhase: null,
+        });
         return;
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let outputStarted = false;
-      let full = "";
+      let streamState = { ...INITIAL_CHAT_STREAM_UI_STATE };
+
+      const parser = createChatSseParser((event) => {
+        const prevState = streamState;
+        streamState = reduceChatStreamUiState(streamState, event);
+        if (
+          streamState.assistantText !== prevState.assistantText ||
+          streamState.isStreamingStatus !== prevState.isStreamingStatus ||
+          streamState.statusPhase !== prevState.statusPhase
+        ) {
+          setLastAssistantState({
+            text: streamState.assistantText,
+            isStreamingStatus: streamState.isStreamingStatus,
+            statusPhase: streamState.statusPhase,
+          });
+        }
+      });
 
       while (true) {
+        if (streamState.streamErrored) {
+          await reader.cancel();
+          break;
+        }
+
         const { value, done } = await reader.read();
         if (done) break;
         if (!value) continue;
 
-        full += decoder.decode(value, { stream: true });
-        const visible = full.replace(/\u200b/g, "");
-
-        if (!outputStarted && visible) {
-          outputStarted = true;
-          stopThinking();
-        }
-
-        if (outputStarted) {
-          setLastAssistantText(visible);
-        }
+        parser.push(decoder.decode(value, { stream: true }));
       }
 
-      if (!outputStarted) {
-        stopThinking();
-        setLastAssistantText("（無回應內容）");
+      if (!streamState.streamErrored) {
+        parser.push(decoder.decode());
+        parser.finish();
+      }
+
+      if (!streamState.streamErrored && !streamState.outputStarted) {
+        setLastAssistantState({
+          text: "（無回應內容）",
+          isStreamingStatus: false,
+          statusPhase: null,
+        });
       }
     } catch (e: any) {
-      stopThinking();
-      setLastAssistantText("錯誤：" + (e?.message || String(e)));
+      setLastAssistantState({
+        text: "錯誤：" + (e?.message || String(e)),
+        isStreamingStatus: false,
+        statusPhase: null,
+      });
     } finally {
-      stopThinking();
       setBusy(false);
     }
-  }, [sessionId, startThinking, stopThinking, setLastAssistantText]);
+  }, [sessionId, setLastAssistantState]);
 
   useEffect(() => {
     reset();
   }, [sessionId, reset]);
-
-  useEffect(() => () => stopThinking(), [stopThinking]);
 
   return { messages, busy, send, hydrate, reset };
 }
