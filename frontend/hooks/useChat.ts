@@ -1,8 +1,8 @@
 // hooks/useChat.ts
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "@/lib/apiFetch";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ApiError, apiFetch } from "@/lib/apiFetch";
 import {
   type ChatStatusPhase,
   createChatSseParser,
@@ -27,9 +27,17 @@ function turnsToMessages(turns: ChatTurn[] | undefined | null): Msg[] {
   return out;
 }
 
-export function useChat(sessionId: string | null) {
+function isTerminalSessionError(error: unknown): boolean {
+  return error instanceof ApiError && [401, 403, 404].includes(error.status);
+}
+
+export function useChat(sessionId: string | null, onInvalidSession?: () => void) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef(0);
+  const onInvalidSessionRef = useRef(onInvalidSession);
+  useEffect(() => { onInvalidSessionRef.current = onInvalidSession; }, [onInvalidSession]);
 
   const setLastAssistantState = useCallback((
     next: Pick<Msg, "text" | "isStreamingStatus" | "statusPhase">
@@ -51,15 +59,24 @@ export function useChat(sessionId: string | null) {
     });
   }, []);
 
-  const hydrate = useCallback((turns: ChatTurn[]) => {
+  const cancelActiveRequest = useCallback(() => {
+    activeRequestIdRef.current += 1;
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     setBusy(false);
-    setMessages(turnsToMessages(turns));
   }, []);
 
+  const hydrate = useCallback((turns: ChatTurn[]) => {
+    cancelActiveRequest();
+    setMessages(turnsToMessages(turns));
+  }, [cancelActiveRequest]);
+
   const reset = useCallback(() => {
-    setBusy(false);
+    cancelActiveRequest();
     setMessages([]);
-  }, []);
+  }, [cancelActiveRequest]);
 
   const send = useCallback(async (text: string) => {
     const q = text.trim();
@@ -69,6 +86,11 @@ export function useChat(sessionId: string | null) {
       setMessages((m) => [...m, { role: "assistant", text: "⚠️ 請先上傳影片再提問" }]);
       return;
     }
+
+    cancelActiveRequest();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const requestId = activeRequestIdRef.current;
 
     setMessages((m) => [
       ...m,
@@ -87,7 +109,10 @@ export function useChat(sessionId: string | null) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, question: q }),
+        signal: controller.signal,
       });
+
+      if (requestId !== activeRequestIdRef.current) return;
 
       if (!res.body) {
         setLastAssistantState({
@@ -103,6 +128,7 @@ export function useChat(sessionId: string | null) {
       let streamState = { ...INITIAL_CHAT_STREAM_UI_STATE };
 
       const parser = createChatSseParser((event) => {
+        if (requestId !== activeRequestIdRef.current) return;
         const prevState = streamState;
         streamState = reduceChatStreamUiState(streamState, event);
         if (
@@ -119,6 +145,10 @@ export function useChat(sessionId: string | null) {
       });
 
       while (true) {
+        if (requestId !== activeRequestIdRef.current) {
+          await reader.cancel();
+          break;
+        }
         if (streamState.streamErrored) {
           await reader.cancel();
           break;
@@ -130,6 +160,8 @@ export function useChat(sessionId: string | null) {
 
         parser.push(decoder.decode(value, { stream: true }));
       }
+
+      if (requestId !== activeRequestIdRef.current) return;
 
       if (!streamState.streamErrored) {
         parser.push(decoder.decode());
@@ -144,19 +176,29 @@ export function useChat(sessionId: string | null) {
         });
       }
     } catch (e: any) {
+      if (controller.signal.aborted || requestId !== activeRequestIdRef.current) return;
+      if (isTerminalSessionError(e)) {
+        onInvalidSessionRef.current?.();
+        return;
+      }
       setLastAssistantState({
         text: "錯誤：" + (e?.message || String(e)),
         isStreamingStatus: false,
         statusPhase: null,
       });
     } finally {
-      setBusy(false);
+      if (requestId === activeRequestIdRef.current) {
+        abortRef.current = null;
+        setBusy(false);
+      }
     }
-  }, [sessionId, setLastAssistantState]);
+  }, [cancelActiveRequest, sessionId, setLastAssistantState]);
 
   useEffect(() => {
     reset();
   }, [sessionId, reset]);
+
+  useEffect(() => () => cancelActiveRequest(), [cancelActiveRequest]);
 
   return { messages, busy, send, hydrate, reset };
 }

@@ -19,7 +19,7 @@ from config import ALLOWED_EXT, DATA_DIR, CHUNK_DIR, video_folder
 from database import get_db
 from services.utils import get_video_meta
 from sql_models import AnalysisMessage, AnalysisRecord, User
-from .utils import assert_under_data_dir, make_session_payload
+from .utils import assert_under_data_dir, is_session_expired, make_session_payload, touch_session
 
 # decord / vLLM 只支援 H.264 / H.265；AV1、VP9 等需要先轉碼
 _NEED_TRANSCODE_CODECS = {"av1", "vp9", "vp8", "theora", "hevc", "h265"}
@@ -260,6 +260,7 @@ class DeleteVideoRequest(BaseModel):
 class AnalysisRecordRequest(BaseModel):
     analysis_record_id: int
     guest_token:        Optional[str] = None
+    session_id:         Optional[str] = None
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -464,17 +465,36 @@ def analysisrecord(
     json_path    = folder / "analysis.json"
     video_path   = folder / "analysis.mp4"
     has_analysis = rec.analysis_done and json_path.exists()
+    store = request.app.state.session_store
 
-    sid     = uuid.uuid4().hex
-    history = _load_recent_history(db, rec.id, limit=40)
-    sess    = make_session_payload(
-        owner_id=rec.owner_id,
-        analysis_record_id=rec.id,
-        video_token=rec.video_token,
-        ext=rec.ext,
-        history=history,
-    )
-    request.app.state.session_store[sid] = sess
+    sid: Optional[str] = None
+    history: List[Dict]
+
+    if req.session_id:
+        existing = store.get(req.session_id)
+        if existing and is_session_expired(existing):
+            store.pop(req.session_id, None)
+            existing = None
+        if existing:
+            same_record = existing.get("analysis_record_id") == rec.id
+            same_owner = existing.get("owner_id") == rec.owner_id
+            same_video = existing.get("video_token") == rec.video_token
+            if same_record and same_owner and same_video:
+                sid = req.session_id
+                touch_session(existing)
+                history = list(existing.get("history") or [])
+
+    if sid is None:
+        sid = uuid.uuid4().hex
+        history = _load_recent_history(db, rec.id, limit=40)
+        sess = make_session_payload(
+            owner_id=rec.owner_id,
+            analysis_record_id=rec.id,
+            video_token=rec.video_token,
+            ext=rec.ext,
+            history=history,
+        )
+        store[sid] = sess
 
     return {
         "ok":         True,

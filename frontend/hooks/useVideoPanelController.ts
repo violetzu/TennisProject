@@ -49,7 +49,7 @@ export function useVideoPanelController({
   analysisRecordId: number | null;
   setFromUpload: (sid: string, recordId: number) => void;
   clearAnalysisResult: (newSessionId: string) => void;
-  loadRecord: (recordId: number) => Promise<any>;
+  loadRecord: (recordId: number, opts?: { sessionId?: string | null }) => Promise<any>;
   analysisCtx: AnalysisStatusContext;
   onShowAnalysis: () => void;
   filename: string | null;
@@ -262,12 +262,11 @@ export function useVideoPanelController({
       seedStatus(null, "idle", 0, null);
       analysisCtx.setYoloVideoUrl(null);
 
-      await loadRecord(analysisRecordId);
       onUploaded?.();
     } catch (e: any) {
       onError("重新分析失敗：" + (e?.message || String(e)));
     }
-  }, [analysisRecordId, clearAnalysisResult, loadRecord, seedStatus, analysisCtx, onUploaded, onError]);
+  }, [analysisRecordId, clearAnalysisResult, seedStatus, analysisCtx, onUploaded, onError]);
 
   // 下載標注影片
   const downloadAnalyzed = useCallback(() => {

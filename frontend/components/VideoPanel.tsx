@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { UploadMeta } from "@/hooks/useVideoUpload";
 import { useVideoPanelController } from "@/hooks/useVideoPanelController";
 import type { AnalysisStatusContext } from "@/hooks/useAnalysisStatus";
-import type { LoadedRecord } from "@/hooks/useCurrentRecord";
+import type { LoadedRecord, LoadRecordOptions } from "@/hooks/useCurrentRecord";
 
 function normalizeVideoSrc(maybe: string | null | undefined): string | null {
   if (!maybe) return null;
@@ -17,6 +17,7 @@ function normalizeVideoSrc(maybe: string | null | undefined): string | null {
 export default function VideoPanel({
   sessionId,
   analysisRecordId,
+  resetVersion,
   setFromUpload,
   clearAnalysisResult,
   loadRecord,
@@ -29,9 +30,10 @@ export default function VideoPanel({
 }: {
   sessionId: string | null;
   analysisRecordId: number | null;
+  resetVersion: number;
   setFromUpload: (sid: string, recordId: number) => void;
   clearAnalysisResult: (newSessionId: string) => void;
-  loadRecord: (recordId: number) => Promise<any>;
+  loadRecord: (recordId: number, opts?: LoadRecordOptions) => Promise<any>;
   analysisCtx: AnalysisStatusContext;
   onShowAnalysis: () => void;
   loadedRecord: LoadedRecord | null;
@@ -49,6 +51,7 @@ export default function VideoPanel({
   const [remoteVideoUrl, setRemoteVideoUrl] = useState<string | null>(null);
 
   const lastSrcRef = useRef<string>("");
+  const lastResetVersionRef = useRef(resetVersion);
 
   // 讓外部可以跳轉影片時間
   useEffect(() => {
@@ -138,6 +141,25 @@ export default function VideoPanel({
     await handleUpload(file);
   }, [handleUpload]);
 
+  const clearVideoState = useCallback(() => {
+    if (localVideoUrl) {
+      try { URL.revokeObjectURL(localVideoUrl); } catch {}
+    }
+    setFilename(null);
+    setMeta(null);
+    setLocalVideoUrl(null);
+    setRemoteVideoUrl(null);
+    lastSrcRef.current = "";
+    lastHydratedRecordRef.current = null;
+    const v = videoRef.current;
+    if (v) {
+      v.removeAttribute("src");
+      v.load();
+      v.style.display = "";
+    }
+    if (fileRef.current) fileRef.current.value = "";
+  }, [localVideoUrl, setFilename, setMeta, setLocalVideoUrl]);
+
   // ===== 拖曳上傳 =====
   useEffect(() => {
     const el = wrapperRef.current;
@@ -167,17 +189,15 @@ export default function VideoPanel({
     };
   }, [lockAll, doUpload]);
 
+  useEffect(() => {
+    if (lastResetVersionRef.current === resetVersion) return;
+    lastResetVersionRef.current = resetVersion;
+    hardReset();
+    clearVideoState();
+  }, [clearVideoState, hardReset, resetVersion]);
+
   // ===== 重置全部 =====
   function resetAll() {
-    hardReset();
-    analysisCtx.reset();
-    setRemoteVideoUrl(null);
-    lastSrcRef.current = "";
-    lastHydratedRecordRef.current = null;
-    const v = videoRef.current;
-    if (v) { v.removeAttribute("src"); v.load(); v.style.display = ""; }
-    // 清空 file input value，確保下次選同一檔案時 onChange 仍會觸發
-    if (fileRef.current) fileRef.current.value = "";
     onReset?.();
   }
 

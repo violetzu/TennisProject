@@ -12,6 +12,7 @@ import { useAnalysisStatus } from "@/hooks/useAnalysisStatus";
 import type { AnalysisMode } from "@/hooks/useAnalysisStatus";
 import { useCurrentRecord } from "@/hooks/useCurrentRecord";
 import { useAuth } from "@/components/AuthProvider";
+import { clearGuestToken } from "@/lib/guestToken";
 
 type LeftTab     = "chat" | "analysis" | "files";
 type AnalysisTab = "rally" | "player" | "depth" | "speed" | "court";
@@ -23,6 +24,7 @@ export default function Page() {
   const [leftTab,       setLeftTab]       = useState<LeftTab>("chat");
   const [analysisTab,   setAnalysisTab]   = useState<AnalysisTab>("rally");
   const [fileReloadKey, setFileReloadKey] = useState(0);
+  const [workspaceResetVersion, setWorkspaceResetVersion] = useState(0);
 
   // ===== 目前工作紀錄 =====
   const {
@@ -41,20 +43,34 @@ export default function Page() {
   // ===== 影片跳轉（由 VideoPanel 填入，AnalysisPanel 呼叫）=====
   const seekToRef = useRef<((t: number) => void) | null>(null);
   const seekVideo = useCallback((t: number) => { seekToRef.current?.(t); }, []);
+  const analysisResetRef = useRef<() => void>(() => {});
 
   // ===== 分析完成回調 =====
   const onCompletedRef = useRef<((mode: AnalysisMode) => Promise<void>) | null>(null);
+  const resetWorkspace = useCallback(() => {
+    clearRecord();
+    analysisResetRef.current();
+    setWorldData(null);
+    setAnalysisTab("rally");
+    setLeftTab("chat");
+    setFileReloadKey((k) => k + 1);
+    setWorkspaceResetVersion((v) => v + 1);
+  }, [clearRecord]);
 
   const analysisCtx = useAnalysisStatus(
     sessionId,
-    useCallback((mode: AnalysisMode) => { void onCompletedRef.current?.(mode); }, [])
+    {
+      onCompleted: useCallback((mode: AnalysisMode) => { void onCompletedRef.current?.(mode); }, []),
+      onInvalidSession: resetWorkspace,
+    }
   );
+  analysisResetRef.current = analysisCtx.reset;
 
   useEffect(() => {
     onCompletedRef.current = async (mode: AnalysisMode) => {
       if (!analysisRecordId) return;
       try {
-        const r = await loadRecord(analysisRecordId);
+        const r = await loadRecord(analysisRecordId, { sessionId });
         if (mode === "combine") {
           if (r.world_data)     setWorldData(r.world_data);
           if (r.yolo_video_url) analysisCtx.setYoloVideoUrl(r.yolo_video_url);
@@ -62,7 +78,7 @@ export default function Page() {
         setFileReloadKey((k) => k + 1);
       } catch { /* 靜默失敗 */ }
     };
-  });
+  }, [analysisCtx.setYoloVideoUrl, analysisRecordId, loadRecord, sessionId]);
 
   // ===== 載入歷史後 seed 分析狀態 =====
   useEffect(() => {
@@ -82,15 +98,6 @@ export default function Page() {
       alert("載入失敗：" + (e?.message || String(e)));
     }
   }, [loadRecord]);
-
-  // ===== 完整重置 =====
-  const handleReset = useCallback(() => {
-    clearRecord();
-    analysisCtx.reset();
-    setWorldData(null);
-    setLeftTab("chat");
-    setFileReloadKey((k) => k + 1);
-  }, [clearRecord, analysisCtx]);
 
   const tabs = useMemo(() => {
     const base: { key: LeftTab; label: string; show: boolean }[] = [
@@ -120,7 +127,8 @@ export default function Page() {
                 onClick={() => {
                   if (!confirm("確定要登出嗎？")) return;
                   logout();
-                  handleReset();
+                  clearGuestToken();
+                  window.location.reload();
                 }}
               >
                 {user?.username ?? "使用者"}
@@ -153,10 +161,10 @@ export default function Page() {
                     leftTab === key ? "visible pointer-events-auto" : "invisible pointer-events-none"
                   }`}
                 >
-                  {key === "chat"     && <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} disabled={analysisCtx.transcoding} />}
+                  {key === "chat"     && <ChatPanel sessionId={sessionId} initialHistory={loadedRecord?.history} disabled={analysisCtx.transcoding} onInvalidSession={resetWorkspace} />}
                   {key === "analysis" && <AnalysisPanel activeTab={analysisTab} onTabChange={setAnalysisTab} worldData={worldData} seekVideo={seekVideo} />}
                   {key === "files"    && (isAuthed
-                    ? <FilePanel onLoadRecord={handleLoadRecord} reloadKey={fileReloadKey} />
+                    ? <FilePanel onLoadRecord={handleLoadRecord} reloadKey={fileReloadKey} currentRecordId={analysisRecordId} onCurrentRecordDeleted={resetWorkspace} />
                     : <div className="p-3 text-sm text-gray-500 dark:text-gray-400">登入後才能查看歷史影片。</div>
                   )}
                 </div>
@@ -168,13 +176,14 @@ export default function Page() {
             <VideoPanel
               sessionId={sessionId}
               analysisRecordId={analysisRecordId}
+              resetVersion={workspaceResetVersion}
               setFromUpload={setFromUpload}
               clearAnalysisResult={clearAnalysisResult}
               loadRecord={loadRecord}
               analysisCtx={analysisCtx}
               onShowAnalysis={() => setLeftTab("analysis")}
               loadedRecord={loadedRecord}
-              onReset={handleReset}
+              onReset={resetWorkspace}
               onUploaded={() => setFileReloadKey((k) => k + 1)}
               seekToRef={seekToRef}
             />

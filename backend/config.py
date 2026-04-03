@@ -31,6 +31,8 @@ def video_folder(owner_id: Optional[int], video_token: str) -> Path:
 
 # ── Media ─────────────────────────────────────────────────────────────────────
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+SESSION_GUEST_TTL = 8 * 60 * 60
+SESSION_USER_TTL  = 24 * 60 * 60
 
 # ── Model paths ───────────────────────────────────────────────────────────────
 BALL_MODEL_PATH  = BASE_DIR / "models" / "ball_best.pt"

@@ -29,10 +29,14 @@ function statusLabel(item: VideoItem) {
 export default function FilePanel({
   onLoadRecord,
   reloadKey,
+  currentRecordId,
+  onCurrentRecordDeleted,
 }: {
   /** 點選「載入」後，以 analysis_record_id 通知外層 */
   onLoadRecord: (analysisRecordId: number) => void;
   reloadKey?: number;
+  currentRecordId?: number | null;
+  onCurrentRecordDeleted?: () => void;
 }) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -71,13 +75,16 @@ export default function FilePanel({
           body: JSON.stringify({ analysis_record_id: id }),
         });
         await refresh();
+        if (currentRecordId === id) {
+          onCurrentRecordDeleted?.();
+        }
       } catch (e: any) {
         setErr(e?.message || String(e));
       } finally {
         setBusy(false);
       }
     },
-    [refresh]
+    [currentRecordId, onCurrentRecordDeleted, refresh]
   );
 
   return (

@@ -8,16 +8,23 @@ export default function ChatPanel({
   sessionId,
   initialHistory,
   disabled,
+  onInvalidSession,
 }: {
   sessionId: string | null;
   initialHistory?: ChatTurn[];
   disabled?: boolean;
+  onInvalidSession?: () => void;
 }) {
-  const { messages, busy, send, hydrate } = useChat(sessionId);
+  const { messages, busy, send, hydrate } = useChat(sessionId, onInvalidSession);
   const isLocked = busy || disabled;
   const [text, setText] = useState("");
 
   const hydratedSidRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setText("");
+    hydratedSidRef.current = null;
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;

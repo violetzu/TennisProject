@@ -15,7 +15,7 @@ from config import GUEST_DIR, CHUNK_DIR, video_folder
 from database import SessionLocal
 from services.utils import get_yolo_models
 from sql_models import AnalysisRecord
-from .utils import safe_under_data_dir
+from .utils import is_session_expired, safe_under_data_dir
 
 CHUNK_MAX_AGE       = 60 * 60           # 1 小時
 GUEST_MAX_AGE_DAYS  = 7
@@ -42,7 +42,7 @@ def _remove(p: Path) -> None:
 
 
 # ── Cleanup loop ──────────────────────────────────────────────────────────────
-async def _cleanup_loop() -> None:
+async def _cleanup_loop(app: FastAPI) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] 背景清理任務已啟動。")
 
     while True:
@@ -62,7 +62,26 @@ async def _cleanup_loop() -> None:
                     if folder.is_dir() and _is_expired(folder, GUEST_VIDEO_MAX_AGE, now):
                         _remove(folder)
 
-            # 3. DB guest records + 資料夾
+            # 3. In-memory session_store
+            store = getattr(app.state, "session_store", None)
+            if isinstance(store, dict):
+                stale_ids = []
+                now_epoch = int(now)
+                for sid, sess in list(store.items()):
+                    if not isinstance(sess, dict):
+                        stale_ids.append(sid)
+                        continue
+                    if sess.get("status") == "processing":
+                        continue
+                    if bool(sess.get("transcoding")):
+                        continue
+                    if is_session_expired(sess, now_epoch):
+                        stale_ids.append(sid)
+
+                for sid in stale_ids:
+                    store.pop(sid, None)
+
+            # 4. DB guest records + 資料夾
             cutoff = datetime.now(timezone.utc) - timedelta(days=GUEST_MAX_AGE_DAYS)
 
             task_db = SessionLocal()
@@ -103,7 +122,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.yolo_court_model = court_model
     print("[lifespan] YOLO models loaded")
 
-    cleanup_task = asyncio.create_task(_cleanup_loop())
+    cleanup_task = asyncio.create_task(_cleanup_loop(app))
 
     try:
         yield

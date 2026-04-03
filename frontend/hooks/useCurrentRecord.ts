@@ -37,6 +37,10 @@ export type LoadedRecord = {
   guest_token: string | null;
 };
 
+export type LoadRecordOptions = {
+  sessionId?: string | null;
+};
+
 type AnalysisRecordResp = {
   ok: boolean;
   session_id: string;
@@ -61,7 +65,10 @@ export function useCurrentRecord() {
   const [error, setError] = useState<string | null>(null);
 
   /** 從歷史載入完整紀錄（FilePanel 點擊「載入」時呼叫） */
-  const load = useCallback(async (recordId: number): Promise<LoadedRecord> => {
+  const load = useCallback(async (
+    recordId: number,
+    opts?: LoadRecordOptions,
+  ): Promise<LoadedRecord> => {
     setLoading(true);
     setError(null);
     try {
@@ -71,6 +78,7 @@ export function useCurrentRecord() {
         body: JSON.stringify({
           analysis_record_id: recordId,
           guest_token: getGuestToken() ?? null,
+          session_id: opts?.sessionId ?? null,
         }),
       });
 

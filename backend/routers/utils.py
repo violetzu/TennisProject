@@ -1,10 +1,11 @@
 # routers/utils.py
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 
-from config import DATA_DIR
+from config import DATA_DIR, SESSION_GUEST_TTL, SESSION_USER_TTL
 from sql_models import User
 
 
@@ -20,6 +21,10 @@ def assert_under_data_dir(p: Path) -> None:
 
 
 # ── Session factory ───────────────────────────────────────────────────────────
+def _now_epoch() -> int:
+    return int(time.time())
+
+
 def make_session_payload(
     *,
     owner_id: Optional[int],
@@ -28,8 +33,10 @@ def make_session_payload(
     ext: str,
     history: list,
 ) -> Dict[str, Any]:
+    now = _now_epoch()
     return {
         "owner_id":           owner_id,
+        "principal_type":     "user" if owner_id is not None else "guest",
         "analysis_record_id": analysis_record_id,
         "status":             "idle",
         "progress":           0,
@@ -37,7 +44,30 @@ def make_session_payload(
         "video_token":        video_token,
         "ext":                ext,
         "history":            history,
+        "created_at":         now,
+        "last_accessed_at":   now,
     }
+
+
+def touch_session(sess: Dict[str, Any]) -> None:
+    sess["last_accessed_at"] = _now_epoch()
+
+
+def session_ttl_seconds(sess: Dict[str, Any]) -> int:
+    if sess.get("principal_type") == "user" or sess.get("owner_id") is not None:
+        return SESSION_USER_TTL
+    return SESSION_GUEST_TTL
+
+
+def is_session_expired(sess: Dict[str, Any], now: Optional[int] = None) -> bool:
+    now_epoch = _now_epoch() if now is None else now
+    last_accessed_at = sess.get("last_accessed_at")
+    created_at = sess.get("created_at")
+    try:
+        touched_at = int(last_accessed_at or created_at or now_epoch)
+    except (TypeError, ValueError):
+        touched_at = now_epoch
+    return now_epoch - touched_at > session_ttl_seconds(sess)
 
 
 # ── Session access ────────────────────────────────────────────────────────────
@@ -57,7 +87,11 @@ def get_session_or_404(
     sess = store.get(session_id)
     if not sess:
         raise HTTPException(404, "session 不存在")
+    if is_session_expired(sess):
+        store.pop(session_id, None)
+        raise HTTPException(404, "session 不存在")
     assert_session_access(sess, current_user)
+    touch_session(sess)
     return sess
 
 

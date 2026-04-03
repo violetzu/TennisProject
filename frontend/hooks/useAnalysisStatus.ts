@@ -4,7 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch } from "@/lib/apiFetch";
+import { ApiError, apiFetch } from "@/lib/apiFetch";
 
 export type AnalysisMode = "combine" | null;
 export type AnalysisStatus = "idle" | "processing" | "completed" | "failed";
@@ -21,6 +21,10 @@ export type AnalysisStatusState = {
 };
 
 export type AnalysisStatusContext = ReturnType<typeof useAnalysisStatus>;
+export type UseAnalysisStatusOptions = {
+  onCompleted?: (mode: AnalysisMode) => void;
+  onInvalidSession?: () => void;
+};
 
 const INITIAL: AnalysisStatusState = {
   mode: null,
@@ -50,21 +54,33 @@ function adaptiveDelay(
   return Math.max(minMs, Math.min(maxMs, msPerPct / 5));
 }
 
+function isTerminalSessionError(error: unknown): boolean {
+  return error instanceof ApiError && [401, 403, 404].includes(error.status);
+}
+
 export function useAnalysisStatus(
   sessionId: string | null,
-  onCompleted?: (mode: AnalysisMode) => void
+  options?: UseAnalysisStatusOptions
 ) {
+  const { onCompleted, onInvalidSession } = options ?? {};
   const [state, setState] = useState<AnalysisStatusState>(INITIAL);
   const [yoloVideoUrl, setYoloVideoUrl] = useState<string | null>(null);
 
   const timerRef = useRef<number | null>(null);
   const modeRef = useRef<AnalysisMode>(null);
   const onCompletedRef = useRef(onCompleted);
+  const onInvalidSessionRef = useRef(onInvalidSession);
+  const invalidSessionNotifiedRef = useRef(false);
   useEffect(() => { onCompletedRef.current = onCompleted; }, [onCompleted]);
+  useEffect(() => { onInvalidSessionRef.current = onInvalidSession; }, [onInvalidSession]);
 
   // 分析 poll 速率追蹤
   const analysisSnapRef = useRef<{ value: number; time: number } | null>(null);
   const analysisDelayRef = useRef(700);
+  const transcodingTimerRef = useRef<number | null>(null);
+  const tcSnapRef = useRef<{ value: number; time: number } | null>(null);
+  const tcDelayRef = useRef(1500);
+  const pollGenerationRef = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (timerRef.current) {
@@ -73,14 +89,45 @@ export function useAnalysisStatus(
     }
   }, []);
 
-  const scheduleAnalysisPoll = useCallback((delay: number) => {
+  const stopTranscodingPoll = useCallback(() => {
+    if (transcodingTimerRef.current) {
+      window.clearTimeout(transcodingTimerRef.current);
+      transcodingTimerRef.current = null;
+    }
+  }, []);
+
+  const invalidatePolls = useCallback(() => {
+    pollGenerationRef.current += 1;
+    stopPolling();
+    stopTranscodingPoll();
+  }, [stopPolling, stopTranscodingPoll]);
+
+  const resetInternal = useCallback(() => {
+    invalidatePolls();
+    setState(INITIAL);
+    setYoloVideoUrl(null);
+    modeRef.current = null;
+    analysisSnapRef.current = null;
+    tcSnapRef.current = null;
+  }, [invalidatePolls]);
+
+  const notifyInvalidSession = useCallback(() => {
+    if (invalidSessionNotifiedRef.current) return;
+    invalidSessionNotifiedRef.current = true;
+    resetInternal();
+    onInvalidSessionRef.current?.();
+  }, [resetInternal]);
+
+  const scheduleAnalysisPoll = useCallback((delay: number, generation = pollGenerationRef.current) => {
     timerRef.current = window.setTimeout(async () => {
       if (!sessionId) return;
+      if (generation !== pollGenerationRef.current) return;
       try {
         const res = await apiFetch(`/api/status/${sessionId}`, { cache: "no-store" });
+        if (generation !== pollGenerationRef.current) return;
         const data = await res.json();
         const sess = data?.session;
-        if (!sess) { scheduleAnalysisPoll(analysisDelayRef.current); return; }
+        if (!sess) { scheduleAnalysisPoll(analysisDelayRef.current, generation); return; }
 
         const s: AnalysisStatus = sess.status ?? "idle";
         const p = Math.max(0, Math.min(100, Number(sess.progress ?? 0)));
@@ -118,41 +165,38 @@ export function useAnalysisStatus(
           analysisSnapRef.current = { value: p, time: now };
         }
 
-        scheduleAnalysisPoll(analysisDelayRef.current);
-      } catch {
-        scheduleAnalysisPoll(analysisDelayRef.current); // 網路錯誤靜默，繼續
+        scheduleAnalysisPoll(analysisDelayRef.current, generation);
+      } catch (error) {
+        if (generation !== pollGenerationRef.current) return;
+        if (isTerminalSessionError(error)) {
+          notifyInvalidSession();
+          return;
+        }
+        scheduleAnalysisPoll(analysisDelayRef.current, generation); // 網路錯誤靜默，繼續
       }
     }, delay);
-  }, [sessionId, stopPolling]);
+  }, [notifyInvalidSession, sessionId, stopPolling]);
 
   const startPolling = useCallback(
     (mode: AnalysisMode) => {
+      invalidSessionNotifiedRef.current = false;
       modeRef.current = mode;
       setState((prev) => ({ ...prev, mode, status: "processing", progress: 0, error: null }));
       stopPolling();
       analysisSnapRef.current = null;
       analysisDelayRef.current = 700;
-      scheduleAnalysisPoll(0); // 立即第一次
+      pollGenerationRef.current += 1;
+      scheduleAnalysisPoll(0, pollGenerationRef.current); // 立即第一次
     },
     [scheduleAnalysisPoll, stopPolling]
   );
 
-  // 轉碼專用 poll
-  const transcodingTimerRef = useRef<number | null>(null);
-  const tcSnapRef = useRef<{ value: number; time: number } | null>(null);
-  const tcDelayRef = useRef(1500);
-
-  const stopTranscodingPoll = useCallback(() => {
-    if (transcodingTimerRef.current) {
-      window.clearTimeout(transcodingTimerRef.current);
-      transcodingTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleTranscodingPoll = useCallback((sid: string, delay: number) => {
+  const scheduleTranscodingPoll = useCallback((sid: string, delay: number, generation = pollGenerationRef.current) => {
     transcodingTimerRef.current = window.setTimeout(async () => {
+      if (generation !== pollGenerationRef.current) return;
       try {
         const res = await apiFetch(`/api/status/${sid}`, { cache: "no-store" });
+        if (generation !== pollGenerationRef.current) return;
         const data = await res.json();
         const sess = data?.session;
         const still = Boolean(sess?.transcoding);
@@ -172,28 +216,32 @@ export function useAnalysisStatus(
           tcSnapRef.current = { value: tp, time: now };
         }
 
-        scheduleTranscodingPoll(sid, tcDelayRef.current);
-      } catch {
-        scheduleTranscodingPoll(sid, tcDelayRef.current);
+        scheduleTranscodingPoll(sid, tcDelayRef.current, generation);
+      } catch (error) {
+        if (generation !== pollGenerationRef.current) return;
+        if (isTerminalSessionError(error)) {
+          notifyInvalidSession();
+          return;
+        }
+        scheduleTranscodingPoll(sid, tcDelayRef.current, generation);
       }
     }, delay);
-  }, [stopTranscodingPoll]);
+  }, [notifyInvalidSession, stopTranscodingPoll]);
 
   const startTranscodingPoll = useCallback((sid: string) => {
+    invalidSessionNotifiedRef.current = false;
     setState((prev) => ({ ...prev, transcoding: true, transcodeProgress: 0 }));
     stopTranscodingPoll();
     tcSnapRef.current = null;
     tcDelayRef.current = 1500;
-    scheduleTranscodingPoll(sid, 0);
+    pollGenerationRef.current += 1;
+    scheduleTranscodingPoll(sid, 0, pollGenerationRef.current);
   }, [scheduleTranscodingPoll, stopTranscodingPoll]);
 
   useEffect(() => {
-    stopPolling();
-    setState(prev => ({ ...INITIAL, transcoding: prev.transcoding }));
-    setYoloVideoUrl(null);
-    modeRef.current = null;
-    analysisSnapRef.current = null;
-  }, [sessionId, stopPolling]);
+    invalidSessionNotifiedRef.current = false;
+    resetInternal();
+  }, [resetInternal, sessionId]);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
@@ -213,12 +261,9 @@ export function useAnalysisStatus(
   );
 
   const reset = useCallback(() => {
-    stopPolling();
-    stopTranscodingPoll();
-    setState(INITIAL);
-    setYoloVideoUrl(null);
-    modeRef.current = null;
-  }, [stopPolling, stopTranscodingPoll]);
+    invalidSessionNotifiedRef.current = false;
+    resetInternal();
+  }, [resetInternal]);
 
   useEffect(() => () => stopTranscodingPoll(), [stopTranscodingPoll]);
 
