@@ -19,7 +19,7 @@ from database import SessionLocal, get_db
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import assert_under_data_dir, build_session_snapshot, get_session_or_404, make_session_payload
 
-from services.analyze.main import analyze
+from services.analyze import analyze
 
 router = APIRouter(prefix="/api", tags=["analyze"])
 
