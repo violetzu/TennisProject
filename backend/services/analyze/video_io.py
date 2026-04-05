@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator
 
 import numpy as np
 
@@ -39,7 +39,7 @@ class VideoPipe:
         self.frame_bytes = width * height * 3
 
         self._dec = self._start_decoder(video_path, width, height)
-        self._enc = self._start_encoder(out_path, width, height, fps)
+        self._enc = self._start_encoder(out_path, width, height, fps, video_path)
 
     # ── public ────────────────────────────────────────────────────────────────
 
@@ -87,13 +87,21 @@ class VideoPipe:
         return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     @staticmethod
-    def _start_encoder(path: Path, w: int, h: int, fps: float) -> subprocess.Popen:
+    def _start_encoder(path: Path, w: int, h: int, fps: float, video_path: Path) -> subprocess.Popen:
+        # input 0: 原始影片（只取音訊串流，-map 0:a:0? 若無音訊不報錯）
+        # input 1: Python 傳入的 raw annotated frames（stdin pipe）
         cmd = [
             "/usr/bin/ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(video_path),
             "-f", "rawvideo", "-vcodec", "rawvideo",
             "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
             "-r", str(fps), "-i", "pipe:0",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-map", "1:v:0",
+            "-map", "0:a:0?",
+            "-shortest",
+            str(path),
         ]
         return subprocess.Popen(
             cmd,

@@ -21,8 +21,8 @@ from services.utils import get_video_meta
 from sql_models import AnalysisMessage, AnalysisRecord, User
 from .utils import assert_under_data_dir, is_session_expired, make_session_payload, touch_session
 
-# decord / vLLM 只支援 H.264 / H.265；AV1、VP9 等需要先轉碼
-_NEED_TRANSCODE_CODECS = {"av1", "vp9", "vp8", "theora", "hevc", "h265"}
+# 瀏覽器 <video> 相容性轉碼：HEVC 瀏覽器支援不完整，Theora 已過時
+_NEED_TRANSCODE_CODECS = {"theora", "hevc", "h265"}
 
 router = APIRouter(prefix="/api", tags=["video"])
 
@@ -53,7 +53,7 @@ def _transcode_to_h264(
     progress_cb: Optional[callable] = None,
 ) -> Path:
     """
-    若影片 codec 屬於 decord/vLLM 不支援的格式（AV1、VP9…），
+    若影片 codec 屬於瀏覽器不支援或支援不完整的格式（HEVC、Theora…），
     用 ffmpeg 轉成 H.264 MP4 並刪除原始檔，回傳新路徑。
     GPU 優先（CUDA decode + h264_nvenc encode），失敗時 fallback 至 CPU。
     progress_cb(pct: int) 會在轉碼過程中持續回呼（0-99）。
@@ -351,7 +351,7 @@ async def upload_complete(
         )
         request.app.state.session_store[sid] = sess
 
-        # 若 codec 不支援（AV1/VP9），在背景轉碼後更新 DB 與 session
+        # 若 codec 瀏覽器支援不佳（HEVC/Theora），在背景轉碼後更新 DB 與 session
         codec = (meta.get("codec") or "").lower()
         need_transcode = codec in _NEED_TRANSCODE_CODECS
         if need_transcode:
