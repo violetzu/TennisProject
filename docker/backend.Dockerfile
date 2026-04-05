@@ -21,13 +21,6 @@ COPY ./backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# COPY models/ball/best.pt ./model/ball/best.pt
-# COPY models/person/yolo11n-pose.pt ./model/person/yolo11n-pose.pt
-# COPY analyze/ ./analyze/
-# COPY static/ ./static/
-# COPY config.py .
-# COPY app.py .
-
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
 
