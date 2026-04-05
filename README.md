@@ -26,7 +26,7 @@ One-click analysis produces a full match breakdown:
 
 ### AI Chat
 
-Ask questions about the match in natural language. The Vision-Language Model (Qwen) has access to both the video and the full analysis JSON, enabling answers like:
+Ask questions about the match in natural language. The Vision-Language Model (Qwen) answers from the analysis data, retrieved rally context, and when needed selected rally thumbnails, enabling answers like:
 
 - *"Who had better court coverage?"*
 - *"Summarize the longest rally"*
@@ -81,7 +81,7 @@ YOLO and vLLM share the same GPU. For a 24 GB card (e.g. RTX 4090), use the 8B m
 
 ### Disk
 
-- Uploaded videos + annotated output (`data/users_analytics/`): 2× original size per video
+- Uploaded videos + annotated output (`data/users/`, `data/guest/`): 2× original size per video
 - vLLM model cache (`data/huggingface/`): 5–60 GB depending on model
 - PostgreSQL data (`data/postgres/`): minimal
 
@@ -95,7 +95,7 @@ cd TennisProject/
 bash ./backend/models/download.sh
 ```
 
-Trained model weights (ball, court) should be placed under `backend/models/`. Model paths are configured in `backend/config.py`. See [Model Training](#model-training) for dataset sources and training scripts.
+`download.sh` places the required weights directly under `backend/models/` (`ball_best.pt`, `court_best.pt`, `yolo26s-pose.pt`). Model paths are configured in `backend/config.py`. See [Model Training](#model-training) for dataset sources and training scripts.
 
 ### 2. Configure
 
@@ -142,10 +142,10 @@ All three detection models were custom-trained. Training scripts, dataset downlo
 | Item | Detail |
 |---|---|
 | Base model | YOLOv26s |
-| Dataset | [TrackNet](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset) (44,747 frames, 1280×720, 30fps) — converted to YOLO format via `tracknet_to_yolo.py` (center point → 16px bbox) |
+| Dataset | [TrackNet](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset) (44,747 frames, 1280×720, 30fps) — converted to YOLO format via `ball_dataset_tracknet_to_yolo.py` (center point → 16px bbox) |
 | Training | 300 epochs, imgsz 1280, batch 48, rect, mixup 0.1 |
 | Result | **mAP50 0.956** |
-| Scripts | `tracknet_dataset.sh` (download), `tracknet_to_yolo.py` (convert), `tracknet_ball_train.sh` (train), `ball_val.sh` (validate) |
+| Scripts | `ball_dataset.sh` (download), `ball_dataset_tracknet_to_yolo.py` (convert), `ball_train.sh` (train), `ball_val.sh` (validate) |
 
 ### Court Keypoint Detection
 
@@ -171,5 +171,5 @@ All three detection models were custom-trained. Training scripts, dataset downlo
 
 ## Links
 
-- [Google Drive — Models & Test Videos](https://drive.google.com/drive/folders/1dw228RNFqR4jMFD7ULwvYfcMtg7ibHHI)
+- [Google Drive — Models](https://drive.google.com/drive/folders/1dw228RNFqR4jMFD7ULwvYfcMtg7ibHHI)
 - [(Guide) Ubuntu Docker + NVIDIA Container Toolkit](https://github.com/violetzu/knowledge/blob/01ecf7828174c0a082418e4410d5e8081abc7799/docker%20install.md)
