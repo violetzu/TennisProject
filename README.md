@@ -142,7 +142,7 @@ All three detection models were custom-trained. Training scripts, dataset downlo
 | Item | Detail |
 |---|---|
 | Base model | YOLOv26s |
-| Dataset | [TrackNet](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset) (44,747 frames, 1280×720, 30fps) — converted to YOLO format via `ball_dataset_tracknet_to_yolo.py` (center point → 16px bbox) |
+| Dataset | [TrackNet](https://github.com/yastrebksv/TrackNet?tab=readme-ov-file#dataset) dataset, stored locally in `backend/models/tracknet_dataset`. The current local copy scanned by this project contains 95 clips / 19,835 frames at 1280×720, 30fps, converted to YOLO format via `ball_dataset_tracknet_to_yolo.py` (center point -> 16px bbox). |
 | Training | 300 epochs, imgsz 1280, batch 48, rect, mixup 0.1 |
 | Result | **mAP50 0.956** |
 | Scripts | `ball_dataset.sh` (download), `ball_dataset_tracknet_to_yolo.py` (convert), `ball_train.sh` (train), `ball_val.sh` (validate) |
