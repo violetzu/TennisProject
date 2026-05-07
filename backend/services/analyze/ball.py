@@ -1,12 +1,14 @@
 """
 球偵測模組 (Ball Detection & Trail Drawing)
 
-包含：
-  - BallTracker             跨幀狀態管理（黑名單 + stuck + 跳躍距離過濾）
-  - is_valid_ball()         幾何篩選
-  - compute_max_trail_jump() 根據球速計算最大合理跳躍距離
-  - filter_outliers()       迭代離群點過濾
-  - draw_ball_trail()       繪製球軌跡線
+純計算模組：不持有 pipeline 狀態（positions list、sliding window 等由 buffer 管理）。
+
+對外介面：
+  - BallTracker.update(frame, frame_idx) / .reset()   per-frame NSA Kalman cascade 追蹤
+  - compute_max_trail_jump(w, h, fps)                 最大合理單幀位移（像素）
+  - filter_outliers(positions, max_jump, fps)         離群點過濾（迭代）
+  - interpolate_gaps(...)                             線性插值補幀
+  - draw_ball_trail(...)                              軌跡繪製
 """
 
 from __future__ import annotations
@@ -17,300 +19,223 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from .constants import WINDOW_SEC, MAX_BALL_SPEED_KMH, COLOR_TOP as _COLOR_TOP, COLOR_BOTTOM as _COLOR_BOTTOM, GRADIENT_HALF_SEC as _GRADIENT_HALF_SEC  # 跨模組共用
-from .court import CourtPoints  # 僅用於 detect() 的型別標注
+from .constants import MAX_BALL_SPEED_KMH, COLOR_TOP as _COLOR_TOP, COLOR_BOTTOM as _COLOR_BOTTOM, GRADIENT_HALF_SEC as _GRADIENT_HALF_SEC
 
 
-# ── 跳躍距離限制 ─────────────────────────────────────────────────────────────────
-MAX_JUMP_RATIO = 0.12           # 單幀最大跳躍距離占畫面對角線比例（超過直接丟棄）
-MISS_RESET_SEC = 0.17           # 連續 N 秒未偵測到球 → 重置 last_center 允許重新捕獲
-REACQ_MAX_SEC = 0.5             # 重捕獲模式最大等待秒數（之後完全放棄距離限制）
-REACQ_JUMP_RATIO = 0.25         # 重捕獲時允許的最大跳躍距離比例（對角線）
+# ── 追蹤器參數 ──────────────────────────────────────────────────────────────
+MAX_JUMP_RATIO = 0.12           # 單幀最大跳躍距離占畫面對角線比例
+MISS_RESET_SEC = 0.17           # 軌跡最大未匹配秒數（超過則移除軌跡）
 
 # ── 靜止假陽性偵測 ─────────────────────────────────────────────────────────────
 STUCK_SEC_LIMIT      = 0.2      # 連續 N 秒位移極小 → 視為靜止假陽性
 STUCK_DIST_THRESHOLD = 3.0      # 靜止判定閾值（像素）
-
-# ── 靜止位置黑名單 ─────────────────────────────────────────────────────────────
 STATIC_BLACKLIST_RADIUS = 25.0  # 黑名單影響半徑（像素）
 STATIC_BLACKLIST_TTL_SEC = 3.0  # 黑名單存活秒數
 
-# ── 滑動窗口延遲（需 ≥ max_gap 確保插值 + 過濾穩定後才寫出）───────────────
-# WINDOW_SEC → 已移至 constants.py，由頂部 import
+# ── 軌跡 / 後處理 ───────────────────────────────────────────────────────────
+TRAIL_SEC              = 1.0    # 繪製軌跡長度（秒）
+OUTLIER_NEIGHBOR_SEC   = 0.2    # 離群點過濾鄰居搜尋範圍（秒）
 
-# ── 場地中線標記過濾 ────────────────────────────────────────────────────────
-CENTER_LINE_RADIUS_RATIO = 0.015  # 中線排除半徑佔畫面對角線比例
+# ── cascade 信心閾值 ─────────────────────────────────────────────────────────
+_HIGH_CONF = 0.5
+_LOW_CONF  = 0.1
 
-# ── 軌跡 / 插值長度 ─────────────────────────────────────────────────────────
-TRAIL_SEC              = 1.0   # 繪製軌跡長度（秒）
-OUTLIER_NEIGHBOR_SEC   = 0.2   # 離群點過濾鄰居搜尋範圍（秒）
 
-# ── 預算平方距離常數（避免每幀 sqrt）────────────────────────────────────────
-_BL_R2 = STATIC_BLACKLIST_RADIUS ** 2
-_STUCK_DIST2 = STUCK_DIST_THRESHOLD ** 2
+# ── NSA Kalman 單軌跡（恆速模型，4 狀態：cx, cy, vx, vy）────────────────────
+
+class _KalmanBallTrack:
+    """單軌跡 Kalman filter，量測 z = [cx, cy]，狀態 x = [cx, cy, vx, vy]。"""
+
+    _F = np.array([[1,0,1,0],[0,1,0,1],[0,0,1,0],[0,0,0,1]], dtype=float)
+    _H = np.array([[1,0,0,0],[0,1,0,0]], dtype=float)
+    _R_BASE = np.diag([5.0, 5.0])
+
+    def __init__(self, cx: float, cy: float, conf: float) -> None:
+        self.x = np.array([cx, cy, 0.0, 0.0], dtype=float)
+        self.P = np.diag([10.0, 10.0, 100.0, 100.0])
+        self.Q = np.diag([1.0, 1.0, 10.0, 10.0])
+        self.R = self._R_BASE.copy()
+        self.age: int = 0           # 0 = 本幀已匹配；>0 = 連續未匹配幀數
+        self.hit_count: int = 1
+        self.last_conf: float = conf
+        self.last_known_pos: Tuple[float, float] = (cx, cy)
+        self.stuck_count: int = 0
+        self._stuck_anchor: Tuple[float, float] = (cx, cy)
+
+    def predict(self) -> None:
+        self.x = self._F @ self.x
+        self.P = self._F @ self.P @ self._F.T + self.Q
+        self.age += 1
+
+    def update(self, cx: float, cy: float, conf: float) -> None:
+        # NSA Kalman：R 依信心縮放，conf 越高量測越可信
+        self.R = self._R_BASE * max(1e-4, (1.0 - conf) ** 2)
+        z = np.array([cx, cy], dtype=float)
+        S = self._H @ self.P @ self._H.T + self.R
+        K = self.P @ self._H.T @ np.linalg.inv(S)
+        self.x = self.x + K @ (z - self._H @ self.x)
+        self.P = (np.eye(4) - K @ self._H) @ self.P
+        self.R = self._R_BASE.copy()
+        self.age = 0
+        self.hit_count += 1
+        self.last_conf = conf
+        self.last_known_pos = (cx, cy)
+
+    @property
+    def pos(self) -> Tuple[float, float]:
+        return float(self.x[0]), float(self.x[1])
 
 
 class BallTracker:
-    """跨幀球追蹤狀態（黑名單 + stuck 偵測 + 位置歷史 + finalize）"""
+    """
+    BallTracker：針對網球單球追蹤設計的跨幀追蹤器。
 
-    def __init__(self, model, width: int = 0, height: int = 0, fps: float = 30.0) -> None:
+    設計要點：
+    - 高/低信心兩段 cascade 匹配（ByteTrack 概念），維護多條 NSA Kalman 軌跡
+    - 距離門控以上一幀已知位置為中心，閾值隨未匹配幀數線性擴張
+    - miss 幀回傳 None（交由 buffer 呼叫 interpolate_gaps 補幀）
+    - track-level stuck 偵測：靜止軌跡加入黑名單並移除
+
+    只持有追蹤器內部狀態（_tracks, _blacklist），不持有 pipeline 歷史。
+    """
+
+    def __init__(self, model, width: int, height: int, fps: float) -> None:
         self.model = model
-        self.last_center: Optional[Tuple[float, float]] = None
-        self.stuck_count: int = 0
-        self.miss_count: int = 0
-        self._blacklist: List[Tuple[float, float, int]] = []  # (cx, cy, expire_frame)
-        # 重捕獲狀態
-        self._pre_reset_center: Optional[Tuple[float, float]] = None
-        self._reacq_countdown: int = 0
-        # 位置歷史
-        self.all_positions: List[Optional[Tuple[float, float]]] = []
-        # max_interp_jump：物理速度上限推算，用於 finalize 離群過濾 + 繪製軌跡
-        self.max_interp_jump: float = (
-            compute_max_trail_jump(width, height, fps) if width > 0 else 0.0
-        )
-        # _finalized_idx：上次 finalize 完成的幀號（內部進度，不再由外部傳入）
-        self._finalized_idx: int = -1
-        # fps 動態換算幀數
         self._fps = fps
-        self._miss_reset_frames = max(1, int(MISS_RESET_SEC * fps))
-        self._reacq_max_frames = max(1, int(REACQ_MAX_SEC * fps))
-        self._stuck_frames_limit = max(1, int(STUCK_SEC_LIMIT * fps))
-        self._blacklist_ttl = max(1, int(STATIC_BLACKLIST_TTL_SEC * fps))
-        # 預算固定幾何量（每幀節省重複計算）
-        self._diag: float = math.hypot(width, height) if width > 0 else 0.0
-        # _detect_max_jump：即時偵測距離上限（較寬鬆，對角線 × ratio）
-        self._detect_max_jump: float = self._diag * MAX_JUMP_RATIO
-        self._reacq_jump: float = self._diag * REACQ_JUMP_RATIO
-        self._center_line_radius: float = (
-            self._diag * CENTER_LINE_RADIUS_RATIO if width > 0 else 20.0
-        )
+        self._height = height
+
+        diag = math.hypot(width, height)
+        self._match_dist: float = diag * MAX_JUMP_RATIO
+        self._max_age: int = max(1, round(MISS_RESET_SEC * fps))
+        self._bl_r2: float = STATIC_BLACKLIST_RADIUS ** 2
+        self._bl_ttl: int = max(1, int(STATIC_BLACKLIST_TTL_SEC * fps))
+        self._stuck_dist2: float = STUCK_DIST_THRESHOLD ** 2
+        self._stuck_limit: int = max(1, int(STUCK_SEC_LIMIT * fps))
+
+        self._tracks: List[_KalmanBallTrack] = []
+        self._blacklist: List[Tuple[float, float, int]] = []  # (cx, cy, expire_frame)
 
     def reset(self) -> None:
-        self.last_center = None
-        self.stuck_count = 0
-        self.miss_count = 0
-        self._pre_reset_center = None
-        self._reacq_countdown = 0
-        self._blacklist.clear()  # 場景切換後舊黑名單座標已無效
+        """場景切換時重置追蹤狀態（舊軌跡與黑名單座標已無效）。"""
+        self._tracks.clear()
+        self._blacklist.clear()
 
-    def _on_miss(self) -> None:
-        """未偵測到球的統一處理。"""
-        self.miss_count += 1
-        if self.miss_count >= self._miss_reset_frames and self.last_center is not None:
-            self._pre_reset_center = self.last_center
-            self._reacq_countdown = self._reacq_max_frames
-            self.last_center = None
-            self.miss_count = 0
-
-    def append_none(self) -> None:
-        """場地偵測失敗幀填 None，與 pose.append_none() 同步呼叫。"""
-        self.all_positions.append(None)
-
-    @property
-    def finalized_idx(self) -> int:
-        """上次 finalize 完成的幀號；buffer 在呼叫 finalize() 前讀取以取得 prev_final。"""
-        return self._finalized_idx
-
-    def finalize(
-        self,
-        positions: List[Optional[Tuple[float, float]]],
-        write_idx: int,
-        prev_final: int,
-        scene_cut_set: set,
-        ball_max_gap: int = 30,
-    ) -> None:
-        """滑動窗口處理：球離群過濾 + 插值（含方向一致性檢查）。
-        positions: 外部球位置列表（buffer._all_ball），原地寫回。
-        prev_final: 上次 finalize 完成的幀號。"""
-        max_jump = self.max_interp_jump
-        fps = self._fps
-        trail_len = max(1, int(TRAIL_SEC * fps))
-        win_frames = max(1, int(WINDOW_SEC * fps))
-
-        # 離群過濾窗口：往前取 trail_len 幀確保跨窗口的假陽性也能被過濾掉
-        start = max(0, write_idx - trail_len + 1)
-        end = min(len(positions), write_idx + win_frames + 1)
-
-        # 對窗口做副本過濾，再將 prev_final 之後的結果寫回原始列表
-        window_slice = list(positions[start:end])
-        cleaned = filter_outliers(window_slice, max_jump, fps=fps)
-        for i, val in enumerate(cleaned):
-            abs_i = start + i
-            if abs_i > prev_final and abs_i <= write_idx:  # 只更新尚未 finalize 的幀
-                if positions[abs_i] is not None and val is None:
-                    old = positions[abs_i]
-                    print(f"  [ball-rm] f={abs_i} t={abs_i/fps:.2f}s "
-                          f"({old[0]:.0f},{old[1]:.0f}) removed by outlier filter")
-                positions[abs_i] = val
-
-        # 對 prev_final+1 到 write_idx 的缺失段做線性插值
-        interp_start = max(0, prev_final + 1)
-        interpolate_gaps(positions, interp_start, write_idx, end,
-                         scene_cut_set, ball_max_gap,
-                         max_jump_per_frame=max_jump)
-
-        # 進度由外部 buffer._finalized_idx 管理
-
-    def detect(
-        self,
-        frame: np.ndarray,
-        img_h: int,
-        frame_idx: int,
-        court_pts: Optional[CourtPoints] = None,
-    ) -> Optional[Tuple[float, float]]:
-        """單幀偵測並自動 append 到 all_positions，回傳 (cx, cy) 或 None。"""
-        box = self._detect_inner(frame, img_h, frame_idx, court_pts)
-        if box:
-            cx = (box[0] + box[2]) / 2
-            cy = (box[1] + box[3]) / 2
-            self.all_positions.append((cx, cy))
-            return (cx, cy)
-        else:
-            self.all_positions.append(None)
-            return None
-
-    def _detect_inner(
-        self,
-        frame: np.ndarray,
-        img_h: int,
-        frame_idx: int,
-        court_pts: Optional[CourtPoints] = None,
-    ) -> Optional[list]:
-        """
-        單幀全圖偵測，回傳 [x1,y1,x2,y2] 或 None。
-        內部管理黑名單與 stuck 過濾。
-        """
-        # 清除過期黑名單
-        self._blacklist[:] = [
-            (x, y, e) for x, y, e in self._blacklist if e > frame_idx
-        ]
+    def update(self, frame: np.ndarray, frame_idx: int) -> Optional[Tuple[float, float]]:
+        """單幀追蹤。回傳 (cx, cy)，或 miss 時回傳 None。"""
+        self._blacklist = [(x, y, e) for x, y, e in self._blacklist if e > frame_idx]
 
         results = self.model.predict(source=frame, imgsz=1280, conf=0.1, verbose=False, half=True)
         ball_r = results[0] if results else None
-        if ball_r is None:
-            self._on_miss()
-            print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s no prediction")
-            return None
-                
-        bx_list   = ball_r.boxes.xyxy.cpu().tolist()
-        conf_list = ball_r.boxes.conf.cpu().tolist()
-        
-        cands: List[Tuple[list, float, Tuple[float, float]]] = []
-        rejected_geom = 0
-        rejected_bl = 0
-
-        for box, conf in zip(bx_list, conf_list):         
-            # 排除畫面極端邊緣的誤偵測
-            cy = (box[1] + box[3]) / 2
-            if cy < img_h * 0.05 or cy > img_h * 0.98:
-                rejected_geom += 1
-                continue
-
-            gx = (box[0] + box[2]) / 2
-            gy = cy
-            if any(
-                (gx - bx) * (gx - bx) + (gy - by) * (gy - by) < _BL_R2
-                for bx, by, _ in self._blacklist
-            ):
-                rejected_bl += 1
-                continue
-            cands.append((box, conf, (gx, gy)))
+        cands = self._extract_candidates(ball_r)
 
         if not cands:
-            self._on_miss()
-            if len(bx_list) > 0:
-                print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s {len(bx_list)} det, "
-                      f"geom={rejected_geom} bl={rejected_bl} → 0 cands, miss={self.miss_count}")
-            return None
+            self._predict_all()
+            self._remove_old()
+            return self._best_pos()
 
-        # 有上一幀位置時，只選跳躍距離合理的候選
-        max_jump = self._detect_max_jump
-        if self.last_center:
-            lx, ly = self.last_center
-            near = [(b, c, g) for b, c, g in cands
-                    if math.hypot(g[0] - lx, g[1] - ly) < max_jump]
-            if near:
-                cands = near
+        high = [(cx, cy, c) for cx, cy, c in cands if c >= _HIGH_CONF]
+        low  = [(cx, cy, c) for cx, cy, c in cands if _LOW_CONF <= c < _HIGH_CONF]
+
+        self._predict_all()
+        unmatched_high, unmatched_tracks = self._match(high, list(range(len(self._tracks))))
+        self._match(low, unmatched_tracks)
+        for cx, cy, conf in unmatched_high:
+            self._tracks.append(_KalmanBallTrack(cx, cy, conf))
+
+        self._remove_old()
+        self._check_stuck(frame_idx)
+        return self._best_pos()
+
+    def _extract_candidates(self, ball_r) -> List[Tuple[float, float, float]]:
+        """從 YOLO 結果提取候選點，套用邊緣與黑名單過濾。"""
+        if ball_r is None or ball_r.boxes is None or len(ball_r.boxes) == 0:
+            return []
+
+        img_h = self._height
+        out = []
+        for box, conf in zip(ball_r.boxes.xyxy.cpu().tolist(), ball_r.boxes.conf.cpu().tolist()):
+            cx = (box[0] + box[2]) / 2
+            cy = (box[1] + box[3]) / 2
+            if cy < img_h * 0.05 or cy > img_h * 0.98:
+                continue
+            if any((cx - bx) ** 2 + (cy - by) ** 2 < self._bl_r2 for bx, by, _ in self._blacklist):
+                continue
+            out.append((cx, cy, float(conf)))
+        return out
+
+    def _predict_all(self) -> None:
+        for t in self._tracks:
+            t.predict()
+
+    def _remove_old(self) -> None:
+        self._tracks = [t for t in self._tracks if t.age <= self._max_age]
+
+    def _best_pos(self) -> Optional[Tuple[float, float]]:
+        """只在當幀有實際 match（age == 0）才回傳，miss 幀回傳 None 交給插值補回。"""
+        live = [t for t in self._tracks if t.age == 0]
+        if not live:
+            return None
+        best = max(live, key=lambda t: (t.hit_count, t.last_conf))
+        return best.pos
+
+    def _check_stuck(self, frame_idx: int) -> None:
+        """偵測靜止假陽性：連續匹配但位移極小的軌跡加入黑名單並移除。"""
+        to_remove = []
+        for i, t in enumerate(self._tracks):
+            if t.age != 0:
+                continue  # 本幀未匹配，不計入 stuck
+            dx = t.last_known_pos[0] - t._stuck_anchor[0]
+            dy = t.last_known_pos[1] - t._stuck_anchor[1]
+            if dx * dx + dy * dy < self._stuck_dist2:
+                t.stuck_count += 1
             else:
-                print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s {len(cands)} cands all too far "
-                      f"(max_jump={max_jump:.0f}, last=({lx:.0f},{ly:.0f}))")
-                self._on_miss()
-                return None
-        elif self._pre_reset_center and self._reacq_countdown > 0:
-            # 重捕獲模式：用寬鬆距離限制，避免抓到遠端假陽性
-            self._reacq_countdown -= 1
-            lx, ly = self._pre_reset_center
-            reacq_jump = self._reacq_jump
-            near = [(b, c, g) for b, c, g in cands
-                    if math.hypot(g[0] - lx, g[1] - ly) < reacq_jump]
-            if near:
-                print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s reacq ok, {len(near)}/{len(cands)} near "
-                      f"pre_reset=({lx:.0f},{ly:.0f})")
-                cands = near
-            else:
-                print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s reacq fail, {len(cands)} cands too far "
-                      f"(reacq_jump={reacq_jump:.0f}, countdown={self._reacq_countdown})")
-                if self._reacq_countdown <= 0:
-                    self._pre_reset_center = None
-                return None
+                t.stuck_count = 0
+                t._stuck_anchor = t.last_known_pos
+            if t.stuck_count >= self._stuck_limit:
+                print(f"  [ball-stuck] f={frame_idx} t={frame_idx/self._fps:.2f}s "
+                      f"({t.last_known_pos[0]:.0f},{t.last_known_pos[1]:.0f}) stuck → blacklisted")
+                self._blacklist.append((*t.last_known_pos, frame_idx + self._bl_ttl))
+                to_remove.append(i)
+        for i in reversed(to_remove):
+            self._tracks.pop(i)
 
-        # 場地標記過濾，落在中線附近的偵測點直接丟棄，不計入 miss_count
-        # 讓追蹤器保持目前 last_center，空幀之後由插值補回。
-        center_line = court_pts.center_line_px if court_pts else None
-        if center_line is not None:
-            (x1, y1), (x2, y2) = center_line
-            dx, dy = x2 - x1, y2 - y1
-            seg_len2 = dx * dx + dy * dy
-            r = self._center_line_radius
-            pre = len(cands)
-            def _keep(g):
-                t = max(0.0, min(1.0, ((g[0]-x1)*dx + (g[1]-y1)*dy) / seg_len2)) if seg_len2 else 0.0
-                return math.hypot(g[0]-(x1+t*dx), g[1]-(y1+t*dy)) >= r
-            cands = [(b, c, g) for b, c, g in cands if _keep(g)]
-            n_mark = pre - len(cands)
-            if n_mark:
-                print(f"  [ball-mark] f={frame_idx} t={frame_idx/self._fps:.2f}s "
-                      f"{n_mark} cand(s) on service center line → rejected")
-            if not cands:
-                return None  # 保留 last_center / miss_count，不影響追蹤狀態
+    def _match(
+        self,
+        dets: List[Tuple[float, float, float]],
+        track_indices: List[int],
+    ) -> Tuple[List[Tuple[float, float, float]], List[int]]:
+        """Hungarian-free 貪心匹配：距離門控以 last_known_pos 為中心，閾值隨 age 擴張。"""
+        if not dets or not track_indices:
+            return dets, track_indices
 
-        self.miss_count = 0
-        self._pre_reset_center = None
-        self._reacq_countdown = 0
+        det_arr = np.array([(cx, cy) for cx, cy, _ in dets], dtype=float)
+        trk_arr = np.array([self._tracks[ti].last_known_pos for ti in track_indices], dtype=float)
+        thresholds = np.array(
+            [self._match_dist * max(1, self._tracks[ti].age) for ti in track_indices], dtype=float
+        )
+        diff = det_arr[:, None, :] - trk_arr[None, :, :]
+        dist_mat = np.sqrt((diff ** 2).sum(axis=2))
+        max_threshold = thresholds.max()
 
-        chosen_box, chosen_conf, (cbx, cby) = max(cands, key=lambda c: c[1])
+        matched_det: set = set()
+        matched_trk: set = set()
+        for flat in np.argsort(dist_mat, axis=None):
+            di, ti_local = divmod(int(flat), len(track_indices))
+            if dist_mat[di, ti_local] > max_threshold:
+                break
+            if dist_mat[di, ti_local] > thresholds[ti_local]:
+                continue
+            if di in matched_det or ti_local in matched_trk:
+                continue
+            cx, cy, conf = dets[di]
+            self._tracks[track_indices[ti_local]].update(cx, cy, conf)
+            matched_det.add(di)
+            matched_trk.add(ti_local)
 
-        # stuck 偵測（平方距離）
-        if (
-            self.last_center
-            and (cbx - self.last_center[0]) ** 2 + (cby - self.last_center[1]) ** 2
-            < _STUCK_DIST2
-        ):
-            self.stuck_count += 1
-        else:
-            self.stuck_count = max(0, self.stuck_count - 1)
-            self.last_center = (cbx, cby)
-
-        if self.stuck_count >= self._stuck_frames_limit:
-            print(f"  [ball] f={frame_idx} t={frame_idx/self._fps:.2f}s stuck={self.stuck_count} → blacklisted "
-                  f"({self.last_center[0]:.0f},{self.last_center[1]:.0f})")
-            if self.last_center is not None:
-                self._blacklist.append(
-                    (self.last_center[0], self.last_center[1],
-                     frame_idx + self._blacklist_ttl)
-                )
-            self.last_center = None
-            self.stuck_count = 0
-            return None
-
-        if self.stuck_count > 0:
-            print(f"  [ball-sticky] f={frame_idx} t={frame_idx/self._fps:.2f}s "
-                  f"({cbx:.0f},{cby:.0f}) stuck={self.stuck_count}/{self._stuck_frames_limit} → discarded")
-            return None
-
-        print(f"  [ball-det] f={frame_idx} t={frame_idx/self._fps:.2f}s "
-              f"→ ({cbx:.0f},{cby:.0f}) conf={chosen_conf:.2f}")
-        return chosen_box
+        return (
+            [dets[i] for i in range(len(dets)) if i not in matched_det],
+            [track_indices[i] for i in range(len(track_indices)) if i not in matched_trk],
+        )
 
 # ── 球速上限跳躍距離 ────────────────────────────────────────────────────────
 

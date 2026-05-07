@@ -95,9 +95,13 @@ def analyze(
                 )
 
                 # ── 主迴圈 ────────────────────────────────────────────────────
+                t_court = t_pose = t_ball = t_buf = 0.0
+
                 for idx, frame in enumerate(pipe.frames()):
                     # 場地偵測
+                    _t = time.perf_counter()
                     court_pts = court.detect(frame, idx)
+                    t_court += time.perf_counter() - _t
 
                     if court_pts is None:
                         if idx in court.scene_cut_set:
@@ -105,11 +109,18 @@ def analyze(
                         top, bot, ball_pos = None, None, None
                     else:
                         # Pose + Ball 推論
+                        _t = time.perf_counter()
                         top, bot = pose.detect(frame, height, idx, court_pts)
-                        ball_pos = ball.detect(frame, height, idx, court_pts)
+                        t_pose += time.perf_counter() - _t
+
+                        _t = time.perf_counter()
+                        ball_pos = ball.update(frame, idx)
+                        t_ball += time.perf_counter() - _t
 
                     # 推入 buffer（滿 WINDOW 時自動 finalize + route）
+                    _t = time.perf_counter()
                     buf.push(FrameSlot(frame, court_pts is not None, court_pts, top, bot, ball_pos))
+                    t_buf += time.perf_counter() - _t
 
                     if progress_cb and total_frames:
                         progress_cb(min(int(idx * 95 / total_frames), 94), 100)
@@ -151,8 +162,14 @@ def analyze(
 
             elapsed = time.perf_counter() - t0_total
             eff_fps = total_frames_actual / elapsed if elapsed > 0 else 0
-            print(f"\n[TIMING] {total_frames_actual} frames, {duration:.1f}s video, "
-                  f"processed in {elapsed:.1f}s → {eff_fps:.1f} effective fps\n")
+            n = total_frames_actual
+            print(f"\n[TIMING] {n} frames, {duration:.1f}s video, "
+                  f"processed in {elapsed:.1f}s → {eff_fps:.1f} effective fps")
+            print(f"[TIMING] per-frame avg — "
+                  f"court {t_court/n*1000:.1f}ms  "
+                  f"pose {t_pose/n*1000:.1f}ms  "
+                  f"ball {t_ball/n*1000:.1f}ms  "
+                  f"buf {t_buf/n*1000:.1f}ms\n")
 
             if progress_cb:
                 progress_cb(100, 100)

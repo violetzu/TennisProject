@@ -46,6 +46,7 @@ DEFAULT_METHODS = [
     "yolo11s_raw",
     "yolo11m_raw",
     "yolo11l_raw",
+    "yolov8m_balltracker",
     "tracknet_retrained",
     "tracknet_v2_retrained",
     "tracknet_v3_tracking_retrained",
@@ -622,9 +623,9 @@ def eval_methods_command(args) -> None:
         if parsed is None:
             continue
         variant, mode, method_name = parsed
-        if mode not in ("raw", "v3rect", "v3rectf"):
+        if mode not in ("raw", "balltracker", "v3rect", "v3rectf"):
             raise ValueError(
-                f"tracker/system method '{method_name}' is not allowed in eval-methods; "
+                f"system method '{method_name}' is not allowed in eval-methods; "
                 "use eval-trackers or eval-ablation instead"
             )
         explicit_path = args.yolo_model_path if method_name == f"{default_variant}_raw" else ""
@@ -648,6 +649,14 @@ def eval_methods_command(args) -> None:
             model_path = resolve_yolo_model_path(variant, explicit_path)
             if mode == "raw":
                 bundle = evaluate_yolo_raw(
+                    args.dist_threshold,
+                    model_path=model_path,
+                    max_clips=args.max_clips,
+                    variant=variant,
+                    method_name=method_name,
+                )
+            elif mode == "balltracker":
+                bundle = evaluate_yolo_balltracker(
                     args.dist_threshold,
                     model_path=model_path,
                     max_clips=args.max_clips,

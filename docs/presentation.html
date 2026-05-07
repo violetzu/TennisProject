@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Software Engineering 第一次報告</title>
+<style>
+:root {
+  --olive: #7a9474;
+  --olive-dark: #4e6b4a;
+  --white: #fff;
+  --black: #1a1a1a;
+  --gray: #444;
+}
+*, *::before, *::after {
+  box-sizing: border-box; margin: 0; padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  background: #2a2a2a;
+  font-family: 'PingFang TC', 'Microsoft JhengHei', 'Segoe UI', Arial, sans-serif;
+}
+
+/* ── Navigation ── */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; height: 44px;
+  background: #111; display: flex; align-items: center;
+  justify-content: center; gap: 14px; z-index: 200;
+}
+.nav button {
+  padding: 5px 14px; background: #333; color: #fff;
+  border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+.nav button:hover { background: #444; }
+.nav .pdf-btn { background: var(--olive); border-color: var(--olive-dark); }
+.nav .counter { color: #aaa; font-size: 13px; min-width: 52px; text-align: center; }
+
+/* ── Deck ── */
+.deck { padding-top: 44px; }
+.deck.single .slide { display: none; }
+.deck.single .slide.active { display: flex; }
+
+/* ── Slide base ── */
+.slide {
+  width: 1280px; height: 720px;
+  margin: 0 auto 16px;
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: #fff;
+}
+
+/* ── Header bar ── */
+.hdr {
+  width: 100%; height: 86px; flex-shrink: 0;
+  background: var(--olive);
+  display: flex; align-items: center; justify-content: center;
+}
+.hdr h2 {
+  color: #fff; font-size: 32px; font-weight: 700; letter-spacing: .05em;
+}
+
+/* ── Body ── */
+.body {
+  flex: 1; padding: 34px 56px; overflow: hidden;
+}
+.stitle {
+  font-size: 22px; font-weight: 700; color: var(--olive-dark);
+  margin: 0 0 10px;
+}
+.stitle + .stitle { margin-top: 22px; }
+ul.bl { list-style: none; padding: 0; }
+ul.bl li {
+  font-size: 21px; color: var(--black);
+  padding: 5px 0 5px 26px; position: relative; line-height: 1.55;
+}
+ul.bl li::before {
+  content: '•'; position: absolute; left: 6px;
+  color: var(--olive); font-size: 19px;
+}
+ol.nl { list-style: none; padding: 0; }
+ol.nl li {
+  font-size: 20px; color: var(--black);
+  padding: 5px 0 5px 34px; position: relative; line-height: 1.5;
+  counter-increment: step;
+}
+ol.nl { counter-reset: step; }
+ol.nl li::before {
+  content: counter(step) ".";
+  position: absolute; left: 4px; color: var(--olive); font-weight: 700;
+}
+
+/* ── Page number ── */
+.pn {
+  position: absolute; bottom: 12px; right: 18px;
+  font-size: 11px; color: #bbb;
+}
+
+/* ────────── SLIDE 1 – TITLE ────────── */
+#s1 { background: var(--olive); flex-direction: row; }
+.t-left {
+  flex: 0 0 65%; padding: 56px 56px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.t-left .big {
+  font-size: 84px; font-weight: 900; color: #fff;
+  line-height: 1.05; margin-bottom: 28px;
+}
+.t-left .sub { font-size: 26px; color: rgba(255,255,255,.88); }
+.t-div {
+  width: 1px; background: rgba(255,255,255,.28);
+  margin: 56px 0; align-self: stretch;
+}
+.t-right {
+  flex: 0 0 35%; padding: 60px 44px;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 18px;
+}
+.t-right .names { font-size: 19px; font-weight: 700; color: #fff; line-height: 2; }
+.t-right .dlabel {
+  font-size: 13px; font-weight: 700; color: rgba(255,255,255,.65);
+  border-top: 1px solid rgba(255,255,255,.35);
+  padding-top: 14px; margin-bottom: 2px;
+}
+.t-right .date { font-size: 17px; color: #fff; }
+.badge {
+  position: absolute; bottom: 22px; left: 26px;
+  font-size: 12px; color: rgba(255,255,255,.5);
+}
+
+/* ────────── SLIDE 2 – TOC ────────── */
+.toc {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px 48px; margin-top: 16px;
+}
+.toc-item {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 22px; color: var(--black);
+  padding: 8px 0; border-bottom: 1px solid #eaeaea;
+}
+.toc-n { font-size: 28px; font-weight: 900; color: var(--olive); min-width: 28px; }
+
+/* ────────── SLIDE 7 – ARCH ────────── */
+#s7 .hdr { height: 70px; }
+#s7 .hdr h2 { font-size: 28px; }
+#s7 .body { padding: 10px 20px; display: flex; align-items: center; justify-content: center; }
+#s7 .body svg { width: 100%; height: auto; }
+
+/* ────────── SLIDE 8 – PERSON ALLOCATION ────────── */
+.atbl { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 6px; }
+.atbl thead tr { background: var(--olive); color: #fff; }
+.atbl thead th {
+  padding: 10px 10px; text-align: center; font-weight: 600;
+  border-right: 1px solid rgba(255,255,255,.25);
+}
+.atbl thead th:nth-child(1) { text-align: left; padding-left: 14px; }
+.atbl tbody tr { background: #fff; }
+.atbl tbody tr.done { background: #f0f7f0; }
+.atbl tbody td {
+  padding: 10px 10px; text-align: center;
+  border-right: 1px solid #dde8dd;
+  border-bottom: 1px solid #dde8dd;
+  font-size: 15px;
+}
+.atbl tbody td:nth-child(1) { font-weight: 700; color: var(--olive-dark); text-align: left; padding-left: 14px; font-size: 16px; }
+.atbl tbody td:nth-child(2) { font-weight: 700; font-size: 15px; }
+.atbl tbody td:nth-child(3) { text-align: left; }
+.name-a { color: #1a5fa0; }
+.name-b { color: #7a3a9e; }
+.done-badge {
+  display: inline-block; padding: 3px 10px;
+  background: #d1fae5; color: #065f46;
+  border-radius: 999px; font-size: 13px; font-weight: 700;
+}
+.pending-badge {
+  display: inline-block; padding: 3px 10px;
+  background: #f3f4f6; color: #9ca3af;
+  border-radius: 999px; font-size: 13px;
+}
+
+/* progress bar in slide 8 */
+.progress-wrap {
+  margin-top: 18px;
+  background: #f0f0f0; border-radius: 8px; overflow: hidden; height: 20px;
+  position: relative;
+}
+.progress-fill {
+  height: 100%; width: 33.3%;
+  background: linear-gradient(90deg, var(--olive-dark), var(--olive));
+  border-radius: 8px;
+}
+.progress-label {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #333;
+}
+.progress-text {
+  margin-top: 6px; font-size: 13px; color: #666; text-align: right;
+}
+
+/* ────────── SLIDE 9 – GANTT ────────── */
+#s9 .hdr { height: 62px; }
+#s9 .hdr h2 { font-size: 26px; }
+#s9 .body { padding: 6px 8px; display: flex; align-items: center; justify-content: center; }
+#s9 .body svg { width: 100%; height: auto; max-height: 630px; }
+
+/* ────────── SLIDE 10 – THANK YOU ────────── */
+#s10 {
+  background: var(--olive);
+  align-items: center; justify-content: center;
+}
+#s10 .ty { font-size: 96px; font-weight: 300; letter-spacing: .16em; color: var(--black); }
+
+/* ── Print ── */
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  body { background: #fff; }
+  .nav { display: none; }
+  .deck { padding-top: 0; }
+  .deck.single .slide { display: flex !important; }
+  .slide { margin: 0; break-after: page; }
+  .slide:last-child { break-after: avoid; }
+  .pn { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="nav" id="nav">
+  <button onclick="go(-1)">◀ Prev</button>
+  <span class="counter" id="ctr">1 / 10</span>
+  <button onclick="go(1)">Next ▶</button>
+  <button class="pdf-btn" onclick="window.print()">⬇ PDF 匯出</button>
+  <button id="modeBtn" onclick="toggleMode()">全部顯示</button>
+</div>
+
+<div class="deck single" id="deck">
+
+<!-- ══ S1 TITLE ══════════════════════════════════════════════════ -->
+<div class="slide active" id="s1">
+  <div class="t-left">
+    <div class="big">Software<br>Engineering</div>
+    <div class="sub">第一次進度報告</div>
+  </div>
+  <div class="t-div"></div>
+  <div class="t-right">
+    <div class="names">G14350009 李品翰<br>G14350042 洪唯榕</div>
+    <div>
+      <div class="dlabel">Date Presented:</div>
+      <div class="date">May 6th, 2026</div>
+    </div>
+  </div>
+  <div class="badge">ⓘ wow</div>
+</div>
+
+<!-- ══ S2 目錄 ═══════════════════════════════════════════════════ -->
+<div class="slide" id="s2">
+  <div class="hdr"><h2>目錄</h2></div>
+  <div class="body">
+    <div class="toc">
+      <div class="toc-item"><span class="toc-n">1</span>模型訓練完成</div>
+      <div class="toc-item"><span class="toc-n">2</span>系統建構完成</div>
+      <div class="toc-item"><span class="toc-n">3</span>人員工作分配</div>
+      <div class="toc-item"><span class="toc-n">4</span>工作預定時程</div>
+    </div>
+  </div>
+  <span class="pn">2</span>
+</div>
+
+<!--
+══ S3–S7 原始投影片（系統目標、功能範圍、技術架構、資料流、架構圖）已暫時隱藏 ══
+
+<div class="slide" id="s3">
+  <div class="hdr"><h2>系統目標與輸出</h2></div>
+  <div class="body">
+    <p class="stitle">核心目標：</p>
+    <ul class="bl">
+      <li>將網球比賽影片轉化為可查詢、視覺化、可追溯的分析結果，並結合 AI 問答能力</li>
+    </ul>
+    <p class="stitle">主要產出：</p>
+    <ul class="bl">
+      <li><strong>標注影片</strong>：分析後生成，含場地線、球員骨架、球軌跡疊加</li>
+      <li><strong>結構化數據</strong>：包含所有回合與事件的 analysis.json</li>
+      <li><strong>互動紀錄</strong>：完整的聊天歷史與分析紀錄</li>
+    </ul>
+  </div>
+  <span class="pn">3</span>
+</div>
+
+<div class="slide" id="s4">
+  <div class="hdr"><h2>系統功能範圍</h2></div>
+  <div class="body">
+    <p class="stitle">涵蓋範圍：</p>
+    <ul class="bl">
+      <li><strong>前端</strong>：影片上傳、播放及分析結果視覺化（Rally / Player / Speed / Court）</li>
+      <li><strong>後端</strong>：FastAPI 任務啟動、使用者與影片管理</li>
+      <li><strong>AI 推論</strong>：YOLO（場地 / 球員 / 球體）與 vLLM（視覺判讀與問答）</li>
+      <li><strong>數據處理</strong>：事件偵測、回合切割、PostgreSQL 紀錄保存</li>
+    </ul>
+  </div>
+  <span class="pn">4</span>
+</div>
+
+<div class="slide" id="s5">
+  <div class="hdr"><h2>技術架構與部署</h2></div>
+  <div class="body">
+    <p class="stitle">部署方式：</p>
+    <ul class="bl">
+      <li>基於 Docker Compose 的服務化部署</li>
+    </ul>
+    <p class="stitle">服務分工：</p>
+    <ul class="bl">
+      <li><strong>Frontend</strong>：Next.js 介面與 API Proxy &nbsp;(:3000)</li>
+      <li><strong>Backend</strong>：FastAPI 主服務 &nbsp;(:8000)</li>
+      <li><strong>Database</strong>：PostgreSQL &nbsp;(:5432)</li>
+      <li><strong>AI Engine</strong>：vLLM（多模態聊天 :8005）與 Embedding（RAG 檢索 :8006）</li>
+      <li><strong>Gateway</strong>：Cloudflared 提供外部 HTTPS</li>
+    </ul>
+  </div>
+  <span class="pn">5</span>
+</div>
+
+<div class="slide" id="s6">
+  <div class="hdr"><h2>核心資料流與邏輯</h2></div>
+  <div class="body" style="display:grid;grid-template-columns:1fr 1fr;gap:0 52px;">
+    <div>
+      <p class="stitle">分析流程：</p>
+      <ol class="nl">
+        <li>上傳並處理分塊影片（H.264 轉碼）</li>
+        <li>啟動 analyze.main — 場地、球員姿態與球體追蹤</li>
+        <li>回合事件彙整與 VLM 背景勝負判斷</li>
+        <li>輸出 analysis.json / analysis.mp4 / thumbs</li>
+      </ol>
+    </div>
+    <div>
+      <p class="stitle">聊天流程：</p>
+      <ul class="bl">
+        <li>使用者提問 → /api/chat</li>
+        <li>讀取 analysis.json + 歷史訊息</li>
+        <li>Embedding 檢索相關回合</li>
+        <li>組 system prompt → vLLM 串流（SSE）</li>
+        <li>必要時 tool call 查看回合縮圖</li>
+        <li>對話持久化到 DB</li>
+      </ul>
+    </div>
+  </div>
+  <span class="pn">6</span>
+</div>
+
+<div class="slide" id="s7">
+  <div class="hdr"><h2>系統架構圖</h2></div>
+  <div class="body">
+    <svg viewBox="0 0 900 415" xmlns="http://www.w3.org/2000/svg"
+         font-family="'PingFang TC','Microsoft JhengHei','Segoe UI',Arial,sans-serif">
+      <defs>
+        <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#3B82F6"/></marker>
+        <marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#6366F1"/></marker>
+        <marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#059669"/></marker>
+        <marker id="a4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#D97706"/></marker>
+      </defs>
+      <rect x="10" y="10"  width="880" height="52" rx="6" fill="#EBF3FB" stroke="#B8D0EA" stroke-width="1"/>
+      <rect x="10" y="82"  width="880" height="72" rx="6" fill="#E8F4FD" stroke="#B8D0EA" stroke-width="1"/>
+      <rect x="10" y="174" width="880" height="72" rx="6" fill="#EEF2FF" stroke="#C7D2FE" stroke-width="1"/>
+      <rect x="10"  y="266" width="428" height="90" rx="6" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1"/>
+      <rect x="462" y="266" width="428" height="90" rx="6" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1"/>
+      <rect x="10"  y="376" width="880" height="32" rx="6" fill="#FFF7ED" stroke="#FED7AA" stroke-width="1"/>
+      <text x="22" y="41"  fill="#2563EB" font-size="10" font-weight="700">使用者</text>
+      <text x="22" y="120" fill="#2563EB" font-size="10" font-weight="700">展示層</text>
+      <text x="22" y="212" fill="#4338CA" font-size="10" font-weight="700">API 層</text>
+      <text x="22" y="300" fill="#059669" font-size="10" font-weight="700">服務層</text>
+      <text x="462" y="300" fill="#059669" font-size="10" font-weight="700">服務層</text>
+      <text x="22" y="396" fill="#D97706" font-size="10" font-weight="700">資料層</text>
+      <rect x="360" y="18" width="180" height="34" rx="5" fill="#BFDBFE" stroke="#3B82F6" stroke-width="1.5"/>
+      <text x="450" y="30" text-anchor="middle" fill="#1D4ED8" font-size="12" font-weight="700">瀏覽器</text>
+      <text x="450" y="44" text-anchor="middle" fill="#1D4ED8" font-size="10">User Browser</text>
+      <line x1="450" y1="52" x2="450" y2="78" stroke="#3B82F6" stroke-width="1.5" marker-end="url(#a1)"/>
+      <rect x="60" y="90" width="780" height="56" rx="4" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1"/>
+      <text x="130" y="108" text-anchor="middle" fill="#1E40AF" font-size="11" font-weight="700">Next.js :3000</text>
+      <rect x="200" y="96" width="94"  height="24" rx="3" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1"/><text x="247" y="112" text-anchor="middle" fill="#1E40AF" font-size="10">VideoPanel</text>
+      <rect x="302" y="96" width="104" height="24" rx="3" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1"/><text x="354" y="112" text-anchor="middle" fill="#1E40AF" font-size="10">AnalysisPanel</text>
+      <rect x="414" y="96" width="90"  height="24" rx="3" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1"/><text x="459" y="112" text-anchor="middle" fill="#1E40AF" font-size="10">ChatPanel</text>
+      <rect x="512" y="96" width="84"  height="24" rx="3" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1"/><text x="554" y="112" text-anchor="middle" fill="#1E40AF" font-size="10">FilePanel</text>
+      <rect x="690" y="96" width="120" height="24" rx="3" fill="#FEF3C7" stroke="#FCD34D" stroke-width="1"/><text x="750" y="112" text-anchor="middle" fill="#92400E" font-size="10">Cloudflare Tunnel</text>
+      <line x1="450" y1="146" x2="450" y2="170" stroke="#6366F1" stroke-width="1.5" marker-end="url(#a2)"/>
+      <rect x="60" y="182" width="780" height="56" rx="4" fill="#E0E7FF" stroke="#A5B4FC" stroke-width="1"/>
+      <text x="140" y="200" text-anchor="middle" fill="#3730A3" font-size="11" font-weight="700">FastAPI :8000</text>
+      <rect x="200" y="188" width="110" height="24" rx="3" fill="#F5F3FF" stroke="#A5B4FC" stroke-width="1"/><text x="255" y="204" text-anchor="middle" fill="#4338CA" font-size="10">video_router</text>
+      <rect x="318" y="188" width="110" height="24" rx="3" fill="#F5F3FF" stroke="#A5B4FC" stroke-width="1"/><text x="373" y="204" text-anchor="middle" fill="#4338CA" font-size="10">analyze_router</text>
+      <rect x="436" y="188" width="110" height="24" rx="3" fill="#F5F3FF" stroke="#A5B4FC" stroke-width="1"/><text x="491" y="204" text-anchor="middle" fill="#4338CA" font-size="10">chat_router</text>
+      <rect x="554" y="188" width="110" height="24" rx="3" fill="#F5F3FF" stroke="#A5B4FC" stroke-width="1"/><text x="609" y="204" text-anchor="middle" fill="#4338CA" font-size="10">user_router</text>
+      <line x1="240" y1="238" x2="240" y2="262" stroke="#059669" stroke-width="1.5" marker-end="url(#a3)"/>
+      <line x1="660" y1="238" x2="660" y2="262" stroke="#059669" stroke-width="1.5" marker-end="url(#a3)"/>
+      <text x="100" y="282" text-anchor="middle" fill="#065F46" font-size="11" font-weight="700">services/analyze</text>
+      <rect x="160" y="272" width="56" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="188" y="285" text-anchor="middle" fill="#065F46" font-size="9">court.py</text>
+      <rect x="222" y="272" width="56" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="250" y="285" text-anchor="middle" fill="#065F46" font-size="9">player.py</text>
+      <rect x="284" y="272" width="50" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="309" y="285" text-anchor="middle" fill="#065F46" font-size="9">ball.py</text>
+      <rect x="340" y="272" width="56" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="368" y="285" text-anchor="middle" fill="#065F46" font-size="9">buffer.py</text>
+      <rect x="160" y="298" width="66" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="193" y="311" text-anchor="middle" fill="#065F46" font-size="9">analysis.py</text>
+      <rect x="232" y="298" width="70" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="267" y="311" text-anchor="middle" fill="#065F46" font-size="9">aggregate.py</text>
+      <rect x="308" y="298" width="80" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="348" y="311" text-anchor="middle" fill="#065F46" font-size="9">vlm_verify.py</text>
+      <text x="165" y="346" fill="#059669" font-size="8.5">YOLO → 場地/球員/球 → buffer → 事件 → aggregate → JSON+MP4</text>
+      <text x="556" y="282" text-anchor="middle" fill="#065F46" font-size="11" font-weight="700">services/chat</text>
+      <rect x="610" y="272" width="62" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="641" y="285" text-anchor="middle" fill="#065F46" font-size="9">context.py</text>
+      <rect x="678" y="272" width="48" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="702" y="285" text-anchor="middle" fill="#065F46" font-size="9">llm.py</text>
+      <rect x="732" y="272" width="52" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="758" y="285" text-anchor="middle" fill="#065F46" font-size="9">tools.py</text>
+      <rect x="610" y="298" width="84" height="20" rx="2" fill="#D1FAE5" stroke="#6EE7B7" stroke-width="1"/><text x="652" y="311" text-anchor="middle" fill="#065F46" font-size="9">persistence.py</text>
+      <text x="610" y="346" fill="#059669" font-size="8.5">embedding 檢索 → system prompt → vLLM SSE → tool call → 持久化</text>
+      <line x1="240" y1="356" x2="240" y2="372" stroke="#D97706" stroke-width="1.5" marker-end="url(#a4)"/>
+      <line x1="660" y1="356" x2="660" y2="372" stroke="#D97706" stroke-width="1.5" marker-end="url(#a4)"/>
+      <rect x="28"  y="381" width="148" height="20" rx="3" fill="#FEE2E2" stroke="#FECACA" stroke-width="1"/><text x="102" y="394" text-anchor="middle" fill="#991B1B" font-size="9.5" font-weight="600">PostgreSQL :5432</text>
+      <rect x="184" y="381" width="178" height="20" rx="3" fill="#FEF3C7" stroke="#FDE68A" stroke-width="1"/><text x="273" y="394" text-anchor="middle" fill="#92400E" font-size="9.5" font-weight="600">vLLM :8005 · Embedding :8006</text>
+      <rect x="370" y="381" width="248" height="20" rx="3" fill="#FCE7F3" stroke="#F9A8D4" stroke-width="1"/><text x="494" y="394" text-anchor="middle" fill="#831843" font-size="9.5" font-weight="600">data/  users · guest · videos_chunks · huggingface</text>
+      <rect x="626" y="381" width="196" height="20" rx="3" fill="#EDE9FE" stroke="#C4B5FD" stroke-width="1"/><text x="724" y="394" text-anchor="middle" fill="#4C1D95" font-size="9.5" font-weight="600">YOLO Models  ball · court · pose</text>
+    </svg>
+  </div>
+  <span class="pn">7</span>
+</div>
+-->
+
+<!-- ══ S3 模型訓練完成 ══════════════════════════════════════════════ -->
+<div class="slide" id="s3">
+  <div class="hdr"><h2>模型訓練完成</h2></div>
+  <div class="body">
+    <p class="stitle">已完成訓練的模型：</p>
+    <ul class="bl">
+      <li><strong>球體偵測（Ball Detection）</strong>：自訓練 YOLO 模型，針對網球高速移動場景優化，達成穩定追蹤</li>
+      <li><strong>場地偵測（Court Detection）</strong>：YOLO 模型識別球場邊線與關鍵點，支援透視校正與位置標定</li>
+      <li><strong>球員姿態估計（Player Pose）</strong>：基於 YOLOv8-pose，提取骨架關節點進行動作分析</li>
+    </ul>
+    <p class="stitle">整合方式：</p>
+    <ul class="bl">
+      <li>三組模型透過 <code>services/analyze/</code> 管線串接，逐幀推論並統一寫入 buffer</li>
+      <li>vLLM 多模態模型負責回合勝負語意判讀與 AI 問答</li>
+    </ul>
+  </div>
+  <span class="pn">3</span>
+</div>
+
+<!-- ══ S4 系統建構完成 ══════════════════════════════════════════════ -->
+<div class="slide" id="s4">
+  <div class="hdr"><h2>系統建構完成</h2></div>
+  <div class="body" style="display:grid;grid-template-columns:1fr 1fr;gap:0 52px;">
+    <div>
+      <p class="stitle">已上線服務：</p>
+      <ul class="bl">
+        <li><strong>Frontend</strong>：Next.js 影片上傳、播放、分析視覺化、AI 問答介面</li>
+        <li><strong>Backend</strong>：FastAPI 任務管理、影片處理、使用者驗證</li>
+        <li><strong>AI Engine</strong>：vLLM 多模態串流聊天、Embedding RAG 檢索</li>
+        <li><strong>Database</strong>：PostgreSQL 持久化分析紀錄與對話歷史</li>
+        <li><strong>Gateway</strong>：Cloudflared 外部 HTTPS 存取</li>
+      </ul>
+    </div>
+    <div>
+      <p class="stitle">已驗證功能：</p>
+      <ul class="bl">
+        <li>影片上傳 → H.264 轉碼 → 分析管線全流程</li>
+        <li>YOLO 推論 → 事件偵測 → 回合切割 → JSON + MP4 輸出</li>
+        <li>AI 問答 SSE 串流 / tool call 縮圖查看</li>
+        <li>前後端整合，Docker Compose 一鍵部署</li>
+      </ul>
+    </div>
+  </div>
+  <span class="pn">4</span>
+</div>
+
+<!-- ══ S8 人員工作分配 ════════════════════════════════════════════ -->
+<div class="slide" id="s8">
+  <div class="hdr"><h2>人員工作分配</h2></div>
+  <div class="body" style="padding:22px 56px;">
+    <table class="atbl">
+      <thead>
+        <tr>
+          <th style="width:58px">週次</th>
+          <th style="width:148px">負責人</th>
+          <th style="width:190px">目標任務</th>
+          <th>主要工作內容</th>
+          <th style="width:96px">狀態</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="done">
+          <td>W1</td>
+          <td><span class="name-a">李品翰</span></td>
+          <td>文件對齊・基線確立</td>
+          <td>系統架構文件整理、文件同步規則建立、API / 資料流對齊</td>
+          <td><span class="done-badge">✓ 完成</span></td>
+        </tr>
+        <tr class="done">
+          <td>W2</td>
+          <td><span class="name-b">洪唯榕</span></td>
+          <td>分析模組建構</td>
+          <td>buffer / analysis / aggregate 責任邊界釐清、逐幀與回合層邏輯分層</td>
+          <td><span class="done-badge">✓ 完成</span></td>
+        </tr>
+        <tr class="done">
+          <td>W3</td>
+          <td><span class="name-a">李品翰</span></td>
+          <td>影音轉碼・音訊策略</td>
+          <td>轉碼策略限制為瀏覽器相容、分析輸出音訊保留實作</td>
+          <td><span class="done-badge">✓ 完成</span></td>
+        </tr>
+        <tr class="done">
+          <td>W4</td>
+          <td><span class="name-b">洪唯榕</span></td>
+          <td>模型比較・方法選定</td>
+          <td>raw / BoT-SORT / Finalized 比較報告、統計表、預設方案定案</td>
+          <td><span class="done-badge">✓ 完成</span></td>
+        </tr>
+        <tr class="done">
+          <td>W5</td>
+          <td><span class="name-a">李品翰</span></td>
+          <td>AI 問答・聊天穩定化</td>
+          <td>SSE 狀態驗證、tool call 穩定化、例外處理修正</td>
+          <td><span class="done-badge">✓ 完成</span></td>
+        </tr>
+        <tr class="done">
+          <td>W6</td>
+          <td><span class="name-b">洪唯榕</span></td>
+          <td>發版整理・正式交付</td>
+          <td>README / SPEC 文件同步、清理實驗記錄、發版檢查表</td>
+          <td><span class="done-badge">✓ 完成</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+        <span style="font-size:14px;font-weight:700;color:var(--olive-dark)">整體進度</span>
+        <span style="font-size:13px;color:#666">W1–W6 全部完成</span>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-fill" style="width:100%"></div>
+        <div class="progress-label">6 / 6 週完成（100%）</div>
+      </div>
+    </div>
+  </div>
+  <span class="pn">8</span>
+</div>
+
+<!-- ══ S9 ACTIVITY BAR CHART ═════════════════════════════════════ -->
+<div class="slide" id="s9">
+  <div class="hdr"><h2>Activity Bar Chart — 6 週工作計畫</h2></div>
+  <div class="body">
+    <svg viewBox="0 0 900 490" xmlns="http://www.w3.org/2000/svg"
+         font-family="'PingFang TC','Microsoft JhengHei','Segoe UI',Arial,sans-serif">
+      <rect x="120" y="52"  width="760" height="36" fill="#EBF3FB"/>
+      <rect x="120" y="88"  width="760" height="36" fill="#fff"/>
+      <rect x="120" y="124" width="760" height="36" fill="#EBF3FB"/>
+      <rect x="120" y="160" width="760" height="36" fill="#fff"/>
+      <rect x="120" y="196" width="760" height="36" fill="#EBF3FB"/>
+      <rect x="120" y="232" width="760" height="36" fill="#fff"/>
+      <rect x="120" y="268" width="760" height="36" fill="#EBF3FB"/>
+      <rect x="120" y="304" width="760" height="36" fill="#fff"/>
+      <rect x="120" y="340" width="760" height="36" fill="#EBF3FB"/>
+      <rect x="120" y="376" width="760" height="36" fill="#fff"/>
+      <rect x="120" y="412" width="760" height="36" fill="#EBF3FB"/>
+      <rect x="120" y="448" width="760" height="36" fill="#fff"/>
+      <rect x="0" y="0" width="900" height="52" fill="#2E75B6"/>
+      <text x="120" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Week 0</text>
+      <text x="247" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">1</text>
+      <text x="373" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">2</text>
+      <text x="500" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">3</text>
+      <text x="627" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">4</text>
+      <text x="753" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">5</text>
+      <text x="880" y="31" text-anchor="middle" fill="white" font-size="12" font-weight="bold">6</text>
+      <text x="60" y="31" text-anchor="middle" fill="white" font-size="11">任務</text>
+      <text x="60" y="44" text-anchor="middle" fill="#cce0f5" font-size="10">Task</text>
+      <line x1="120" y1="52" x2="120" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <line x1="247" y1="52" x2="247" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <line x1="373" y1="52" x2="373" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <line x1="500" y1="52" x2="500" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <line x1="627" y1="52" x2="627" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <line x1="753" y1="52" x2="753" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <line x1="880" y1="52" x2="880" y2="484" stroke="#D0D8E4" stroke-width="1"/>
+      <rect x="120" y="52" width="760" height="432" fill="none" stroke="#8CA8C5" stroke-width="1.5"/>
+      <!-- Start -->
+      <polygon points="120,61 129,70 120,79 111,70" fill="#1F1F1F"/>
+      <text x="133" y="74" fill="#1F1F1F" font-size="12" font-weight="bold">Start</text>
+      <!-- W1 (done – green) -->
+      <text x="115" y="110" text-anchor="end" fill="#333" font-size="13" font-weight="600">W1</text>
+      <rect x="120" y="97" width="127" height="18" fill="#6aab6a" stroke="#3d8b3d" stroke-width="1" rx="2"/>
+      <text x="183" y="110" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">✓ 文件對齊</text>
+      <!-- M1 -->
+      <polygon points="247,133 256,142 247,151 238,142" fill="#1F1F1F"/>
+      <text x="260" y="146" fill="#333" font-size="11">(M1/W1) 基線確立</text>
+      <!-- W2 (done – green) -->
+      <text x="115" y="182" text-anchor="end" fill="#333" font-size="13" font-weight="600">W2</text>
+      <rect x="247" y="169" width="126" height="18" fill="#6aab6a" stroke="#3d8b3d" stroke-width="1" rx="2"/>
+      <text x="310" y="182" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">✓ 流程建構</text>
+      <!-- W3 (done – green) -->
+      <text x="115" y="218" text-anchor="end" fill="#333" font-size="13" font-weight="600">W3</text>
+      <rect x="247" y="205" width="126" height="18" fill="#6aab6a" stroke="#3d8b3d" stroke-width="1" rx="2"/>
+      <text x="310" y="218" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">✓ 影音修正</text>
+      <!-- M2 -->
+      <polygon points="373,241 382,250 373,259 364,250" fill="#1F1F1F"/>
+      <text x="386" y="254" fill="#333" font-size="11">(M2/W2&amp;W3) 建構完成・音訊確認</text>
+      <!-- W4 (done – green) -->
+      <text x="115" y="290" text-anchor="end" fill="#333" font-size="13" font-weight="600">W4</text>
+      <rect x="247" y="277" width="380" height="18" fill="#6aab6a" stroke="#3d8b3d" stroke-width="1" rx="2"/>
+      <text x="437" y="290" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">✓ 模型比較（研究工作，可平行）</text>
+      <!-- W5 (done – green) -->
+      <text x="115" y="326" text-anchor="end" fill="#333" font-size="13" font-weight="600">W5</text>
+      <rect x="373" y="313" width="127" height="18" fill="#6aab6a" stroke="#3d8b3d" stroke-width="1" rx="2"/>
+      <text x="436" y="326" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">✓ 聊天穩定</text>
+      <!-- M3 -->
+      <polygon points="500,349 509,358 500,367 491,358" fill="#1F1F1F"/>
+      <text x="513" y="362" fill="#333" font-size="11">(M3/W5) 聊天穩定化</text>
+      <!-- M4 -->
+      <polygon points="627,385 636,394 627,403 618,394" fill="#1F1F1F"/>
+      <text x="640" y="398" fill="#333" font-size="11">(M4/W4) 方法選定</text>
+      <!-- W6 (done – green) -->
+      <text x="115" y="434" text-anchor="end" fill="#333" font-size="13" font-weight="600">W6</text>
+      <rect x="627" y="421" width="253" height="18" fill="#6aab6a" stroke="#3d8b3d" stroke-width="1" rx="2"/>
+      <text x="753" y="434" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">✓ 發版整理</text>
+      <!-- Finish -->
+      <polygon points="880,457 889,466 880,475 871,466" fill="#1F1F1F"/>
+      <text x="866" y="470" text-anchor="end" fill="#1F1F1F" font-size="12" font-weight="bold">Finish</text>
+      <line x1="0" y1="484" x2="900" y2="484" stroke="#8CA8C5" stroke-width="1"/>
+      <!-- Progress line at Week 6 (complete) -->
+      <line x1="880" y1="52" x2="880" y2="484" stroke="#e05a2b" stroke-width="2" stroke-dasharray="6,3"/>
+      <rect x="814" y="56" width="66" height="18" rx="3" fill="#e05a2b"/>
+      <text x="847" y="68" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">目前進度</text>
+      <!-- Legend -->
+      <rect x="140" y="488" width="14" height="10" fill="#9DC3E6" stroke="#2E75B6" stroke-width="1" rx="1"/>
+      <text x="158" y="497" fill="#555" font-size="10">任務區間</text>
+      <polygon points="198,493 205,500 198,507 191,500" fill="#1F1F1F"/>
+      <text x="210" y="501" fill="#555" font-size="10">里程碑 milestone</text>
+    </svg>
+  </div>
+  <span class="pn">9</span>
+</div>
+
+<!-- ══ S10 THANK YOU ══════════════════════════════════════════════ -->
+<div class="slide" id="s10">
+  <div class="ty">THANK YOU</div>
+  <span class="pn" style="color:rgba(0,0,0,.25)">10</span>
+</div>
+
+</div><!-- /deck -->
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const deck = document.getElementById('deck');
+let cur = 0;
+const N = slides.length;
+
+function update() {
+  document.getElementById('ctr').textContent = (cur+1) + ' / ' + N;
+}
+function go(d) {
+  if (!deck.classList.contains('single')) return;
+  slides[cur].classList.remove('active');
+  cur = (cur + d + N) % N;
+  slides[cur].classList.add('active');
+  update();
+}
+function toggleMode() {
+  const single = deck.classList.toggle('single');
+  document.getElementById('modeBtn').textContent = single ? '全部顯示' : '單頁模式';
+  if (single) slides[cur].classList.add('active');
+}
+document.addEventListener('keydown', e => {
+  if (['ArrowRight','ArrowDown',' '].includes(e.key)) { e.preventDefault(); go(1); }
+  else if (['ArrowLeft','ArrowUp'].includes(e.key))  { e.preventDefault(); go(-1); }
+});
+update();
+</script>
+</body>
+</html>

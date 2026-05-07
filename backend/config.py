@@ -35,7 +35,8 @@ SESSION_GUEST_TTL = 8 * 60 * 60
 SESSION_USER_TTL  = 24 * 60 * 60
 
 # ── Model paths ───────────────────────────────────────────────────────────────
-BALL_MODEL_PATH  = BASE_DIR / "models" / "ball_best.pt"
+# BALL_MODEL_PATH  = BASE_DIR / "models" / "ball_best.pt"
+BALL_MODEL_PATH = BASE_DIR / "test/balltest/artifacts/checkpoints/yolo_retrained/balltest-yolo26m2/weights/best.pt"
 POSE_MODEL_PATH  = BASE_DIR / "models" / "yolo26s-pose.pt"
 COURT_MODEL_PATH = BASE_DIR / "models" / "court_best.pt"
 # ── Video serving ─────────────────────────────────────────────────────────────
@@ -89,7 +90,7 @@ VLLM = VLLMConfig(
 EMBEDDING = EmbeddingConfig(
     url     = os.getenv("APP_EMBEDDING_URL",   "http://vllm-embedding:8006"),
     model   = os.getenv("APP_EMBEDDING_MODEL", "BAAI/bge-m3"),
-    api_key = os.getenv("APP_VLLM_API_KEY"),
+    api_key = os.getenv("APP_EMBEDDING_API_KEY"),
 )
 
 DB = DBConfig(

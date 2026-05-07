@@ -22,11 +22,20 @@ from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .ball import BallTracker, draw_ball_trail
+from .ball import (
+    BallTracker,
+    TRAIL_SEC,
+    compute_max_trail_jump,
+    draw_ball_trail,
+    filter_outliers,
+    interpolate_gaps,
+)
 from .constants import (
     WINDOW_SEC, WRIST_HIT_RADIUS, RALLY_GAP_SEC,
     WRIST_SEARCH_SEC, SWING_CHECK_SEC, FORWARD_COURT_SEC, SERVE_TOSS_LOOKBACK_SEC, SERVE_CROSS_SEC,
 )
+
+BALL_MAX_GAP = 30
 from .court import CourtDetectior, CourtPoints, draw_court
 from .player import PoseDetector, PlayerDetection, draw_skeleton
 from .analysis import (
@@ -78,6 +87,9 @@ class FrameBuffer:
         self._height = height
         self._pipe = video_pipe
         self._ball = ball
+        self._max_jump = compute_max_trail_jump(width, height, fps)
+        self._trail_len = max(1, int(TRAIL_SEC * fps))
+        self._win_frames = max(1, int(WINDOW_SEC * fps))
         self._pose = pose
         self._court = court
         self._thumbs = thumbs
@@ -130,7 +142,7 @@ class FrameBuffer:
             slot = self._window[0]
 
             prev_final = self._finalized_idx
-            self._ball.finalize(self._all_ball, widx, prev_final, self._court.scene_cut_set)
+            self._finalize_ball(widx, prev_final)
             self._pose.finalize(self._all_top, self._all_bot, widx, prev_final, self._fps, self._court.scene_cut_set)
             self._finalized_idx = widx
 
@@ -167,13 +179,38 @@ class FrameBuffer:
         widx = self._write_idx
 
         prev_final = self._finalized_idx
-        self._ball.finalize(self._all_ball, widx, prev_final, self._court.scene_cut_set)
+        self._finalize_ball(widx, prev_final)
         self._pose.finalize(self._all_top, self._all_bot, widx, prev_final, self._fps, self._court.scene_cut_set)
         self._finalized_idx = widx
 
         slot = self._window[0]
         self._route_frame(slot, widx)
         self._write_idx += 1
+
+    def _finalize_ball(self, write_idx: int, prev_final: int) -> None:
+        """球位置滑動窗口後處理：離群過濾 + 線性插值（原地寫回 _all_ball）。"""
+        positions = self._all_ball
+        max_jump = self._max_jump
+        fps = self._fps
+        start = max(0, write_idx - self._trail_len + 1)
+        end = min(len(positions), write_idx + self._win_frames + 1)
+
+        cleaned = filter_outliers(positions[start:end], max_jump, fps=fps)
+        for i, val in enumerate(cleaned):
+            abs_i = start + i
+            if prev_final < abs_i <= write_idx:
+                if positions[abs_i] is not None and val is None:
+                    old = positions[abs_i]
+                    print(f"  [ball-rm] f={abs_i} t={abs_i/fps:.2f}s "
+                          f"({old[0]:.0f},{old[1]:.0f}) removed by outlier filter")
+                positions[abs_i] = val
+
+        interp_start = max(0, prev_final + 1)
+        interpolate_gaps(
+            positions, interp_start, write_idx, end,
+            self._court.scene_cut_set, BALL_MAX_GAP,
+            max_jump_per_frame=max_jump,
+        )
 
     # ── internal: rally routing ───────────────────────────────────────────────
 
@@ -386,7 +423,7 @@ class FrameBuffer:
         bot = self._all_bot[widx] if widx < len(self._all_bot) else None
         draw_skeleton(slot.frame, top, bot)
 
-        draw_ball_trail(slot.frame, widx, self._all_ball, self._ball.max_interp_jump,
+        draw_ball_trail(slot.frame, widx, self._all_ball, self._max_jump,
                         self._ball_owner, fps=self._fps, contact_segments=contact_segments)
         self._thumbs.save_rendered(slot.frame, widx)
         self._pipe.write(slot.frame)

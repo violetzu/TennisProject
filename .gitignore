@@ -5,3 +5,11 @@ __pycache__/
 data/*
 backend/videos/*
 backend/test/*
+!backend/test/balltest/
+backend/test/balltest/*
+!backend/test/balltest/*.py
+system_sequence_diagram.*
+待做工作.md
+
+*.pt
+*.pdf
