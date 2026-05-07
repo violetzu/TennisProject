@@ -1,0 +1,29 @@
+[project]
+name = "tennis-backend"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    # Web framework
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "pydantic",
+    "python-dotenv",
+    # CV / ML（torch 由 pytorch base image 提供，不在此列）
+    "numpy",
+    "opencv-python",
+    "pillow",
+    "ultralytics",
+    "lap",
+    "supervision",
+    "PyYAML",
+    # HTTP
+    "requests",
+    # Database
+    "sqlalchemy",
+    "psycopg2-binary",
+    # Auth
+    "python-jose[cryptography]",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt<4",
+]

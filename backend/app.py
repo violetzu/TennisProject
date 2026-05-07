@@ -32,3 +32,8 @@ app.include_router(analyze_router)
 app.include_router(chat_router)
 app.include_router(user_router)
 app.include_router(video_router)
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}

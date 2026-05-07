@@ -1,0 +1,12 @@
+node_modules/
+frontend/.next/
+.env*
+!.env.example
+.git/
+data/
+__pycache__/
+*.pyc
+*.dump
+*.pt
+thesis/
+docs/
