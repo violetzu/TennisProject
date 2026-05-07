@@ -35,7 +35,7 @@ docker compose exec db psql -U tennis -d tennis
 ## 開發規則
 
 - 本機不安裝任何 Node / Python 套件，所有指令透過 Docker 執行
-- Next.js 16（node:20-bookworm-slim）；Backend Python 3.x（pytorch/pytorch CUDA image）
+- Next.js 16（node:22-bookworm-slim）；Backend Python 3.x（pytorch/pytorch CUDA image）
 - 前端呼叫 backend 一律走 Next.js rewrites（`/api/*` → `http://backend:8000/api/*`），不直接打 `BACKEND_DOMAIN`
 - Auth（登入、JWT）由 FastAPI 管；Next.js 側無 NextAuth
 - FastAPI 直接用 SQLAlchemy 管理 DB（`Base.metadata.create_all`），目前無 Alembic migration；schema 變更需手動處理或重建 DB
@@ -52,6 +52,6 @@ docker compose exec db psql -U tennis -d tennis
 
 ## 環境
 
-- Node 20，Python（pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime）
+- Node 22，Python（pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime）
 - PostgreSQL 16
 - GPU：nvidia，用於 backend（CV 推理）及 vllm / vllm-embedding（LLM 推理）
