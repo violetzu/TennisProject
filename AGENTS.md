@@ -12,7 +12,7 @@
 
 ## Auth
 
-Auth-0：Next.js 無 NextAuth；Auth 完全由 FastAPI JWT 處理（個人帳號 + 訪客 token 皆在 fastapi-service）
+Auth-2 §C：FastAPI 個人帳號（自訂 JWT）；個人帳號 + 訪客 token 皆在 fastapi-service，Next.js 無 Auth.js
 
 ## 常用指令
 
