@@ -9,7 +9,6 @@
 §C：FastAPI 主導 + Next.js 薄殼，DB 由 FastAPI 管（SQLAlchemy + PostgreSQL）；FastAPI 負責 CV 推理、影片分析、Auth（自訂 JWT）
 
 專案名（DB user / DB name）：`tennis`
-部署網址：`https://your-domain.example.com`
 
 ## Auth
 
