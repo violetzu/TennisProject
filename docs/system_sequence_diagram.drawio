@@ -1,0 +1,669 @@
+<mxfile host="app.diagrams.net" agent="Claude" version="26.0.0">
+  <diagram id="seq-all" name="系統循序圖">
+    <mxGraphModel dx="2800" dy="3600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="3300" pageHeight="4200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== Title ===== -->
+        <mxCell id="title" value="&lt;b&gt;TennisProject 系統循序圖&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=20;" vertex="1" parent="1">
+          <mxGeometry x="600" y="-120" width="400" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Participants (Lifelines) ===== -->
+        <!-- User/Browser -->
+        <mxCell id="p_user" value="&lt;b&gt;使用者&lt;br&gt;(Browser)&lt;/b&gt;" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;participant=1;size=40;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="80" y="-60" width="120" height="4100" as="geometry" />
+        </mxCell>
+        <!-- Frontend (Next.js) -->
+        <mxCell id="p_front" value="&lt;b&gt;Frontend&lt;br&gt;(Next.js)&lt;/b&gt;" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;participant=1;size=40;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="340" y="-60" width="120" height="4100" as="geometry" />
+        </mxCell>
+        <!-- Backend (FastAPI) -->
+        <mxCell id="p_back" value="&lt;b&gt;Backend&lt;br&gt;(FastAPI)&lt;/b&gt;" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;participant=1;size=40;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="620" y="-60" width="120" height="4100" as="geometry" />
+        </mxCell>
+        <!-- PostgreSQL -->
+        <mxCell id="p_db" value="&lt;b&gt;PostgreSQL&lt;/b&gt;" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;participant=1;size=40;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="900" y="-60" width="120" height="4100" as="geometry" />
+        </mxCell>
+        <!-- Analyze Service -->
+        <mxCell id="p_analyze" value="&lt;b&gt;Analyze&lt;br&gt;Service&lt;/b&gt;" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;participant=1;size=40;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="-60" width="120" height="4100" as="geometry" />
+        </mxCell>
+        <!-- vLLM -->
+        <mxCell id="p_vllm" value="&lt;b&gt;vLLM&lt;br&gt;(Qwen)&lt;/b&gt;" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;participant=1;size=40;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="-60" width="120" height="4100" as="geometry" />
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 1: 認證流程 (Auth Flow) -->
+        <!-- ================================================================ -->
+        <mxCell id="s1_frame" value="&lt;b&gt;1. 認證流程 (Auth Flow)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=200;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="20" width="1020" height="310" as="geometry" />
+        </mxCell>
+
+        <!-- 1a: Register -->
+        <mxCell id="s1_opt_reg" value="alt [註冊]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=80;height=18;fillColor=none;strokeColor=#999999;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="50" width="980" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="s1a1" value="輸入帳號/密碼 → 送出" style="html=1;verticalAlign=bottom;endArrow=block;entryX=0;entryY=0;exitX=1;exitY=0;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="80" as="sourcePoint" />
+            <mxPoint x="400" y="80" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1a2" value="POST /api/auth/register&#xa;{username, password}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="100" as="sourcePoint" />
+            <mxPoint x="680" y="100" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1a3" value="INSERT users" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="120" as="sourcePoint" />
+            <mxPoint x="960" y="120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1a4" value="OK" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="140" as="sourcePoint" />
+            <mxPoint x="680" y="140" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1a5" value="201 Created" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="155" as="sourcePoint" />
+            <mxPoint x="400" y="155" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- 1b: Login -->
+        <mxCell id="s1_opt_login" value="alt [登入]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=80;height=18;fillColor=none;strokeColor=#999999;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="180" width="980" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s1b1" value="輸入帳號/密碼 → 登入" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="210" as="sourcePoint" />
+            <mxPoint x="400" y="210" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1b2" value="POST /api/auth/login&#xa;(OAuth2 form)" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="230" as="sourcePoint" />
+            <mxPoint x="680" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1b3" value="SELECT users WHERE username" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="250" as="sourcePoint" />
+            <mxPoint x="960" y="250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1b4" value="user record" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="270" as="sourcePoint" />
+            <mxPoint x="680" y="270" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1b5" value="verify_password → create_access_token (JWT)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="290" as="sourcePoint" />
+            <mxPoint x="400" y="290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s1b6" value="localStorage.setItem(&quot;access_token&quot;, JWT)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="308" as="sourcePoint" />
+            <mxPoint x="140" y="308" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 2: 影片上傳流程 (Upload Flow) -->
+        <!-- ================================================================ -->
+        <mxCell id="s2_frame" value="&lt;b&gt;2. 影片上傳流程 (Video Upload)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=260;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="370" width="1020" height="460" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2a1" value="拖放/選取影片檔" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="410" as="sourcePoint" />
+            <mxPoint x="400" y="410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s2a1b" value="URL.createObjectURL()&#xa;→ 立即本地預覽" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="435" as="sourcePoint" />
+            <mxPoint x="140" y="435" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Chunk upload loop -->
+        <mxCell id="s2_loop" value="loop [每個 chunk, concurrency=3, 10MB/chunk]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=330;height=18;fillColor=none;strokeColor=#6c8ebf;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="450" width="480" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="s2a2" value="POST /api/upload_chunk&#xa;{upload_id, index, chunk}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="475" as="sourcePoint" />
+            <mxPoint x="680" y="475" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s2a3" value="寫入 _chunks/{upload_id}/{index}.part" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="500" as="sourcePoint" />
+            <mxPoint x="400" y="500" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Upload complete -->
+        <mxCell id="s2a4" value="POST /api/upload_complete&#xa;{upload_id, filename}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="545" as="sourcePoint" />
+            <mxPoint x="680" y="545" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Backend: merge + meta + DB -->
+        <mxCell id="s2_note1" value="合併 chunks → 目標路徑&#xa;get_video_meta()&#xa;(duration/fps/codec)" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="720" y="535" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2a5" value="INSERT analysis_records" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="610" as="sourcePoint" />
+            <mxPoint x="960" y="610" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s2a6" value="record (id, session_id)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="630" as="sourcePoint" />
+            <mxPoint x="680" y="630" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Transcode opt -->
+        <mxCell id="s2_opt_trans" value="opt [codec ∈ {av1, vp9, vp8, theora, hevc, h265}]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=260;height=18;fillColor=none;strokeColor=#b85450;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="550" y="645" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s2_note_trans" value="BackgroundTask: ffmpeg 轉碼 → H.264&#xa;sess[&quot;transcoding&quot;] = True" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="570" y="660" width="200" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2a7" value="{session_id, analysis_record_id,&#xa;guest_token, meta, transcoding}" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="720" as="sourcePoint" />
+            <mxPoint x="400" y="720" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Guest token -->
+        <mxCell id="s2_opt_guest" value="opt [訪客]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=80;height=18;fillColor=none;strokeColor=#999999;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="740" width="320" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="s2a8" value="sessionStorage.setItem(&quot;guest_token&quot;)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="762" as="sourcePoint" />
+            <mxPoint x="140" y="762" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Transcoding poll -->
+        <mxCell id="s2_opt_poll" value="opt [transcoding=true]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=160;height=18;fillColor=none;strokeColor=#999999;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="790" width="480" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="s2a9" value="loop 自適應輪詢: GET /api/status/{sid} 直到 transcoding=false" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="808" as="sourcePoint" />
+            <mxPoint x="680" y="808" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 3: 綜合分析流程 (Analysis Flow) -->
+        <!-- ================================================================ -->
+        <mxCell id="s3_frame" value="&lt;b&gt;3. 綜合分析流程 (Analysis Pipeline)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=300;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="870" width="1580" height="870" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3a1" value="點擊「綜合分析」按鈕" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="910" as="sourcePoint" />
+            <mxPoint x="400" y="910" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a2" value="POST /api/analyze&#xa;{session_id}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="935" as="sourcePoint" />
+            <mxPoint x="680" y="935" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a3" value="驗證 session + record" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="960" as="sourcePoint" />
+            <mxPoint x="960" y="960" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a3r" value="record" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="978" as="sourcePoint" />
+            <mxPoint x="680" y="978" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s3a4" value="asyncio.create_task()&#xa;→ 非同步啟動分析" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="1000" as="sourcePoint" />
+            <mxPoint x="1240" y="1000" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s3a5" value="202 Accepted" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="1020" as="sourcePoint" />
+            <mxPoint x="400" y="1020" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Frontend polling loop -->
+        <mxCell id="s3_loop_poll" value="loop [自適應輪詢直到 completed/failed]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=280;height=18;fillColor=none;strokeColor=#6c8ebf;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="1040" width="480" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="s3a6" value="GET /api/status/{session_id}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="1065" as="sourcePoint" />
+            <mxPoint x="680" y="1065" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a7" value="{status, progress: 0-100%}" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="1088" as="sourcePoint" />
+            <mxPoint x="400" y="1088" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Analysis Pipeline Detail (running in background) -->
+        <mxCell id="s3_pipe_frame" value="par [背景分析 Pipeline]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=200;height=18;fillColor=none;strokeColor=#9673a6;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="1030" width="500" height="580" as="geometry" />
+        </mxCell>
+
+        <!-- Phase 1: Detection -->
+        <mxCell id="s3_phase1" value="&lt;b&gt;階段 1: 逐幀偵測與標注輸出&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=220;height=18;fillColor=none;strokeColor=#9673a6;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1060" width="460" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="s3_note_p1" value="FFmpeg decode → 逐幀 numpy&#xa;&#xa;1. 場地偵測 (court_model, conf≥0.8)&#xa;   → Homography + 14 關鍵點&#xa;   → draw_court()&#xa;&#xa;2. Pose 偵測 (yolo26s-pose)&#xa;   → 上/下方球員位置 + 手腕座標&#xa;   → draw_skeleton()&#xa;&#xa;3. Ball 偵測 (BallTracker)&#xa;   → 靜止黑名單 + 離群過濾&#xa;&#xa;4. 滑動窗口 process_window()&#xa;   → 插值 → 定案&#xa;&#xa;5. 回合感知繪製 → FFmpeg encode" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="1085" width="230" height="170" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3_prog1" value="progress_cb(done, total)&#xa;→ sess[&quot;progress&quot;] 0-95%" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1240" y="1260" as="sourcePoint" />
+            <mxPoint x="680" y="1260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Phase 2: Events -->
+        <mxCell id="s3_phase2" value="&lt;b&gt;階段 2: 事件偵測 + 回合整理&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=260;height=18;fillColor=none;strokeColor=#9673a6;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1280" width="460" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="s3_note_p2" value="detect_events → contacts + bounces&#xa;segment_rallies + build_single_rally&#xa;compute_frame_speeds_world (km/h)" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="1305" width="230" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Phase 3: VLM -->
+        <mxCell id="s3_phase3" value="&lt;b&gt;階段 3: VLM 回合勝負判定&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=260;height=18;fillColor=none;strokeColor=#9673a6;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1380" width="460" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="s3_vlm1" value="verify_rally_winner()&#xa;縮圖 → VLM 推理" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1240" y="1420" as="sourcePoint" />
+            <mxPoint x="1520" y="1420" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3_vlm2" value="&lt;winner&gt;top|bottom|unknown&lt;/winner&gt;" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1520" y="1445" as="sourcePoint" />
+            <mxPoint x="1240" y="1445" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Phase 4: Aggregate -->
+        <mxCell id="s3_phase4" value="&lt;b&gt;階段 4: 統計彙整&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=230;height=18;fillColor=none;strokeColor=#9673a6;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="1490" width="460" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="s3_note_p4" value="build_summary() → analysis.json" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="1512" width="230" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Analysis complete → update DB -->
+        <mxCell id="s3a_done1" value="UPDATE analysis_records&#xa;SET analysis_json_path, yolo_video_path" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1240" y="1565" as="sourcePoint" />
+            <mxPoint x="960" y="1565" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a_done2" value="sess[&quot;status&quot;] = &quot;completed&quot;" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1240" y="1590" as="sourcePoint" />
+            <mxPoint x="680" y="1590" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Frontend receives completed -->
+        <mxCell id="s3a8" value="status=completed&#xa;→ onCompleted(&quot;combine&quot;)" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="1625" as="sourcePoint" />
+            <mxPoint x="400" y="1625" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s3a9" value="POST /api/analysisrecord&#xa;{analysis_record_id, guest_token?}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="1660" as="sourcePoint" />
+            <mxPoint x="680" y="1660" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a10" value="{record, world_data, history}" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="1685" as="sourcePoint" />
+            <mxPoint x="400" y="1685" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s3a11" value="setWorldData → 顯示分析結果&#xa;播放標注影片" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="1710" as="sourcePoint" />
+            <mxPoint x="140" y="1710" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 4: AI 聊天流程 (Chat Flow) -->
+        <!-- ================================================================ -->
+        <mxCell id="s4_frame" value="&lt;b&gt;4. AI 聊天流程 (Chat with Streaming)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=300;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1790" width="1580" height="490" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s4a1" value="輸入問題 → Enter 送出" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="1830" as="sourcePoint" />
+            <mxPoint x="400" y="1830" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s4a1b" value="顯示「思考中...」動畫" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="1850" as="sourcePoint" />
+            <mxPoint x="140" y="1850" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s4a2" value="POST /api/chat（SSE proxy）&#xa;{session_id, question}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="1875" as="sourcePoint" />
+            <mxPoint x="680" y="1875" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Backend: build context -->
+        <mxCell id="s4a3" value="讀取 analysis_json" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="1900" as="sourcePoint" />
+            <mxPoint x="960" y="1900" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s4a3r" value="record + json_path" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="1918" as="sourcePoint" />
+            <mxPoint x="680" y="1918" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s4_note_ctx" value="_build_analysis_context (RAG)&#xa;→ 結構化摘要 + 相關回合&#xa;&#xa;_build_messages:&#xa;  sys_prompt + RAG + history(10輪)&#xa;  + user(question)" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="720" y="1925" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Call vLLM -->
+        <mxCell id="s4a4" value="POST /v1/chat/completions&#xa;stream=True (+ tools)" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2020" as="sourcePoint" />
+            <mxPoint x="1520" y="2020" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- SSE streaming loop -->
+        <mxCell id="s4_loop_sse" value="loop [SSE stream tokens]" style="shape=umlFrame;whiteSpace=wrap;html=1;width=170;height=18;fillColor=none;strokeColor=#666666;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="2040" width="1300" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s4a5" value="SSE delta token" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1520" y="2070" as="sourcePoint" />
+            <mxPoint x="680" y="2070" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s4_note_think" value="thinking=True: 緩衝直到 &lt;/think&gt;&#xa;thinking=False: yield token 到前端" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="720" y="2075" width="200" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s4a6" value="StreamingResponse&#xa;text/event-stream" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2120" as="sourcePoint" />
+            <mxPoint x="400" y="2120" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s4a7" value="即時串流顯示" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2145" as="sourcePoint" />
+            <mxPoint x="140" y="2145" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Finally: persist -->
+        <mxCell id="s4a8" value="finally: 寫入 session history&#xa;+ DB (analysis_messages)" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2200" as="sourcePoint" />
+            <mxPoint x="960" y="2200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s4a8r" value="OK" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="2220" as="sourcePoint" />
+            <mxPoint x="680" y="2220" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 5: 載入歷史紀錄 (Load History) -->
+        <!-- ================================================================ -->
+        <mxCell id="s5_frame" value="&lt;b&gt;5. 載入歷史紀錄 (Load History Record)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=300;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="2330" width="1020" height="350" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s5a1" value="FilePanel → 選擇歷史影片" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="2370" as="sourcePoint" />
+            <mxPoint x="400" y="2370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a1b" value="POST /api/videolist" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2395" as="sourcePoint" />
+            <mxPoint x="680" y="2395" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a1c" value="SELECT analysis_records&#xa;WHERE owner_id" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2415" as="sourcePoint" />
+            <mxPoint x="960" y="2415" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a1d" value="影片列表" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="2435" as="sourcePoint" />
+            <mxPoint x="680" y="2435" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a1e" value="[{id, video_name, status_badge}]" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2455" as="sourcePoint" />
+            <mxPoint x="400" y="2455" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s5a2" value="點擊「載入」" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="2485" as="sourcePoint" />
+            <mxPoint x="400" y="2485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a3" value="POST /api/analysisrecord&#xa;{analysis_record_id, guest_token?}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2510" as="sourcePoint" />
+            <mxPoint x="680" y="2510" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a4" value="SELECT record +&#xa;最近 40 筆 messages" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2535" as="sourcePoint" />
+            <mxPoint x="960" y="2535" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a5" value="record + messages" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="2560" as="sourcePoint" />
+            <mxPoint x="680" y="2560" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a6" value="make_session_payload()&#xa;→ 建立新 session" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2585" as="sourcePoint" />
+            <mxPoint x="400" y="2585" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a6b" value="{session_id, record, world_data,&#xa;history, guest_token}" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2610" as="sourcePoint" />
+            <mxPoint x="400" y="2610" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s5a7" value="setWorldData + seedStatus&#xa;hydrate(history) → 恢復聊天&#xa;播放 yolo_video / raw_video" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2650" as="sourcePoint" />
+            <mxPoint x="140" y="2650" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 6: 重新分析流程 (Reanalyze) -->
+        <!-- ================================================================ -->
+        <mxCell id="s6_frame" value="&lt;b&gt;6. 重新分析流程 (Reanalyze)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=260;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="2730" width="1020" height="280" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s6a1" value="點擊「重置分析」→ confirm" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="140" y="2770" as="sourcePoint" />
+            <mxPoint x="400" y="2770" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s6a2" value="POST /api/reanalyze&#xa;{analysis_record_id, guest_token}" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2800" as="sourcePoint" />
+            <mxPoint x="680" y="2800" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s6a3" value="刪除 yolo_video + analysis_json 檔案&#xa;UPDATE record SET paths=NULL&#xa;DELETE analysis_messages" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2830" as="sourcePoint" />
+            <mxPoint x="960" y="2830" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s6a3r" value="OK" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="2860" as="sourcePoint" />
+            <mxPoint x="680" y="2860" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s6a4" value="建立新 session (history=[])&#xa;→ {session_id}" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="2885" as="sourcePoint" />
+            <mxPoint x="400" y="2885" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s6a5" value="clearAnalysisResult()&#xa;seedStatus(idle)&#xa;loadRecord() → 重新載入" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2910" as="sourcePoint" />
+            <mxPoint x="680" y="2910" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s6a5r" value="重置完成 → 可重新分析" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="400" y="2980" as="sourcePoint" />
+            <mxPoint x="140" y="2980" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ================================================================ -->
+        <!-- SECTION 7: 背景清理 (Background Cleanup) -->
+        <!-- ================================================================ -->
+        <mxCell id="s7_frame" value="&lt;b&gt;7. 背景清理 (Lifespan Cleanup, 每10分鐘)&lt;/b&gt;" style="shape=umlFrame;whiteSpace=wrap;html=1;width=330;height=20;fillColor=#f0f0f0;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="530" y="3060" width="520" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s7_note" value="1. 清除 _chunks/ 下 &gt;1hr 暫存&#xa;2. 清除 guest/ 下 &gt;7天 影片&#xa;3. DELETE DB 訪客 records &gt;7天" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="580" y="3090" width="200" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s7a1" value="SELECT expired guest records" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="3155" as="sourcePoint" />
+            <mxPoint x="960" y="3155" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s7a2" value="expired records" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="3175" as="sourcePoint" />
+            <mxPoint x="680" y="3175" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s7a3" value="DELETE records + files" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="3195" as="sourcePoint" />
+            <mxPoint x="960" y="3195" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="s7a4" value="OK" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="960" y="3215" as="sourcePoint" />
+            <mxPoint x="680" y="3215" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===== Network Flow Legend ===== -->
+        <mxCell id="legend" value="&lt;b&gt;網路流向&lt;/b&gt;&#xa;&#xa;外部 → Cloudflare Tunnel → frontend:3000&#xa;  /api/chat → frontend proxy → backend:8000&#xa;  其他 /api/*、/videos/* → backend:8000&#xa;backend → postgres:5432&#xa;backend → vllm:8005 / embedding:8006" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="30" y="3280" width="300" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow legend -->
+        <mxCell id="legend2" value="&lt;b&gt;圖例&lt;/b&gt;" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=15;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="360" y="3280" width="200" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_sync" value="同步請求 →" style="html=1;verticalAlign=bottom;endArrow=block;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="370" y="3320" as="sourcePoint" />
+            <mxPoint x="500" y="3320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="leg_async" value="回應/非同步 --&gt;" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;rounded=0;fontSize=10;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="370" y="3350" as="sourcePoint" />
+            <mxPoint x="500" y="3350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="leg_loop_text" value="loop = 重複區塊&#xa;alt = 條件分支&#xa;opt = 可選區塊&#xa;par = 並行區塊" style="text;html=1;align=left;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="370" y="3360" width="150" height="50" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

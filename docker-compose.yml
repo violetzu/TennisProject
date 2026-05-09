@@ -22,9 +22,9 @@ services:
       retries: 5
     logging: *default-logging
 
-  backend:
+  fastapi:
     build:
-      context: ./backend
+      context: ./fastapi-service
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
@@ -41,12 +41,12 @@ services:
       APP_EMBEDDING_URL: ${APP_EMBEDDING_URL:-http://vllm-embedding:8006}
       APP_EMBEDDING_MODEL: ${APP_EMBEDDING_MODEL:-}
       APP_EMBEDDING_API_KEY: ${APP_EMBEDDING_API_KEY:-}
-      VIDEO_URL_DOMAIN: ${VIDEO_URL_DOMAIN:-http://backend:8000}
+      VIDEO_URL_DOMAIN: ${VIDEO_URL_DOMAIN:-http://fastapi:8000}
     expose:
       - "8000"
     volumes:
-      - ./backend/models:/app/models
-      - ./backend/test:/app/test
+      - ./fastapi-service/models:/app/models
+      - ./fastapi-service/test:/app/test
       - ./data/users_analytics:/data
     ipc: host
     deploy:
@@ -67,19 +67,19 @@ services:
         condition: service_healthy
     logging: *default-logging
 
-  frontend:
+  app:
     build:
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       TZ: Asia/Taipei
-      BACKEND_DOMAIN: http://backend:8000
+      FASTAPI_SERVICE_URL: http://fastapi:8000
       ALLOWED_DEV_ORIGINS: ${ALLOWED_DEV_ORIGINS:-}
     expose:
       - "3000"
     depends_on:
-      backend:
+      fastapi:
         condition: service_healthy
     logging: *default-logging
 
@@ -88,7 +88,7 @@ services:
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
     depends_on:
-      - frontend
+      - app
     logging: *default-logging
 
   vllm:

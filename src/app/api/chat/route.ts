@@ -4,7 +4,7 @@
 
 import { NextRequest } from "next/server";
 
-const BACKEND = process.env.BACKEND_DOMAIN || "http://backend:8000";
+const BACKEND = process.env.FASTAPI_SERVICE_URL || "http://fastapi:8000";
 
 export async function POST(req: NextRequest) {
   const body = await req.arrayBuffer();

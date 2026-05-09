@@ -1,0 +1,29 @@
+  {
+    "git.additionalRepositories": ["thesis"],
+    "latex-workshop.latex.autoBuild.run": "onSave",
+    "latex-workshop.latex.recipe.default": "latexmk (XeLaTeX)",
+    "latex-workshop.latex.recipes": [
+      {
+        "name": "latexmk (XeLaTeX)",
+      "tools": ["latexmk (XeLaTeX)"]
+    }
+  ],
+  "latex-workshop.latex.tools": [
+    {
+      "name": "latexmk (XeLaTeX)",
+      "command": "latexmk",
+      "args": [
+        "-cd",
+        "-xelatex",
+        "-synctex=1",
+        "-interaction=nonstopmode",
+        "-file-line-error",
+        "-outdir=%OUTDIR%",
+        "%DOC%"
+      ],
+      "env": {}
+    }
+  ],
+  "latex-workshop.latex.outDir": "%DIR%/build",
+  "liveServer.settings.port": 5503
+}

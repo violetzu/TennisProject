@@ -7,7 +7,7 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
-const backendDomain = process.env.BACKEND_DOMAIN || "http://backend:8000";
+const backendDomain = process.env.FASTAPI_SERVICE_URL || "http://fastapi:8000";
 
 const nextConfig: NextConfig = {
   output: "standalone",

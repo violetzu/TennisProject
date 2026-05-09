@@ -1,12 +1,12 @@
 node_modules/
-frontend/.next/
+.next/
 .env*
 !.env.example
 .git/
 data/
-__pycache__/
-*.pyc
 *.dump
 *.pt
 thesis/
 docs/
+fastapi-service/
+
