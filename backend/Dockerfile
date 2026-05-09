@@ -1,5 +1,4 @@
 FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
-
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,14 +18,11 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-COPY pyproject.toml uv.lock ./
+COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv pip install --system -r requirements.txt
 
 COPY . .
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

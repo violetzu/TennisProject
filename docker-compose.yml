@@ -93,7 +93,7 @@ services:
 
   vllm:
     image: vllm/vllm-openai:nightly
-    profiles: [vllm]
+    profiles: [vllm, llm]
     restart: unless-stopped
     ipc: host
     expose:
@@ -128,7 +128,7 @@ services:
 
   vllm-embedding:
     image: vllm/vllm-openai:nightly
-    profiles: [vllm]
+    profiles: [vllm, embedding]
     restart: unless-stopped
     ipc: host
     expose:

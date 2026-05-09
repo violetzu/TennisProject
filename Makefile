@@ -30,6 +30,21 @@ db-restore:   ## Restore database from backup.dump
 up-vllm:      ## Start production stack with vLLM profile
 	$(DC) --profile vllm up -d --build
 
+down-vllm:    ## Stop production stack with vLLM profile
+	$(DC) --profile vllm down
+
+up-embedding: ## Start production stack with embedding profile
+	$(DC) --profile embedding up -d --build
+
+down-embedding: ## Stop production stack with embedding profile
+	$(DC) --profile embedding down
+
+up-llm:       ## Start production stack with llm profile
+	$(DC) --profile llm up -d --build	
+
+down-llm:     ## Stop production stack with llm profile
+	$(DC) --profile llm down
+
 setup:        ## First-time setup: copy .env
 	@if [ ! -f .env ]; then cp .env.example .env; echo "Created .env — please fill in secrets before starting"; else echo ".env already exists, skipped"; fi
 
