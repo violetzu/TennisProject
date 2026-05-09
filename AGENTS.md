@@ -51,3 +51,7 @@ docker compose exec db psql -U tennis -d tennis
 - Node 22，Python（pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime）
 - PostgreSQL 16
 - GPU：nvidia，用於 fastapi-service（CV 推理）及 vllm / vllm-embedding（LLM 推理）
+
+## 維護說明
+
+本文件由 AI 維護。架構、Auth 模式、服務名稱、開發規則有變動時，同步更新本文件。
